@@ -32,6 +32,7 @@ data:
         min_neighborhood: 0
         max_neighborhood: 40
       split: ./scripts/train/assets/validation_ids.txt
+      noesy_dir: null # Path to NOESY data for this dataset (e.g., /path/to/dataset1/noesy_files)
 
   filters:
     - _target_: boltz.data.filter.dynamic.size.SizeFilter
@@ -72,6 +73,10 @@ data:
   max_dist: 22.0
   num_bins: 64
   atoms_per_window_queries: 32
+  # NOESY data featurization parameters
+  noesy_num_bins: 64      # Number of bins for NOESY distance discretization
+  noesy_min_dist: 0.0     # Minimum distance for NOESY binning (Angstroms)
+  noesy_max_dist: 5.0     # Maximum distance for NOESY binning (Angstroms, should ideally match generation cutoff)
 
 model:
   _target_: boltz.model.model.Boltz1
@@ -92,6 +97,8 @@ model:
   embedder_args:
     atom_encoder_depth: 3
     atom_encoder_heads: 4
+    no_atom_encoder: false          # Set to true if use_noesy_pipeline is true and no atom attention is desired
+    use_noesy_pipeline: false     # If true, InputEmbedder excludes MSA-features (profile, del_mean) from 's'
 
   msa_args:
     msa_s: 64
@@ -102,6 +109,10 @@ model:
     pairwise_num_heads: 4
     activation_checkpointing: true
     offload_to_cpu: false
+    # NOESY related args for MSAModule (active if use_noesy: true)
+    use_noesy: false              # If true, MSAModule uses NOESYModule to generate 'z'
+    noesy_feature_dim: ${data.noesy_num_bins} # Input dim for NOESYModule (from data config)
+    noesy_hidden_dim: null        # Optional hidden dim for NOESYModule's MLP (e.g., 32 or 64)
 
   pairformer_args:
     num_blocks: 48

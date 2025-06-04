@@ -34,6 +34,7 @@ data:
         min_neighborhood: 0
         max_neighborhood: 40
       split: ./scripts/train/assets/validation_ids.txt
+      noesy_dir: null # Path to NOESY data for this dataset
 
   filters:
     - _target_: boltz.data.filter.dynamic.size.SizeFilter
@@ -74,6 +75,10 @@ data:
   max_dist: 22.0
   num_bins: 64
   atoms_per_window_queries: 32
+  # NOESY data featurization parameters (must match data config in structure.yaml if using same data processing)
+  noesy_num_bins: 64      # Number of bins for NOESY distance discretization
+  noesy_min_dist: 0.0     # Minimum distance for NOESY binning (Angstroms)
+  noesy_max_dist: 5.0     # Maximum distance for NOESY binning (Angstroms)
 
 model:
   _target_: boltz.model.model.Boltz1
@@ -128,8 +133,47 @@ model:
   structure_prediction_training: false
   confidence_prediction: true
   alpha_pae: 1
-  confidence_imitate_trunk: true
+  confidence_imitate_trunk: true # If true, ConfidenceModule creates its own InputEmbedder and MSAModule
   confidence_model_args:
+    # These are args for ConfidenceModule.__init__
+    # full_embedder_args and msa_args are needed if confidence_imitate_trunk: true
+    # Their structure should mirror the main model's embedder_args and msa_args respectively for NOESY settings.
+    full_embedder_args: # Args for InputEmbedder within ConfidenceModule
+      # atom_s, atom_z, token_s, token_z, etc. are typically inherited or set to match main trunk if not specified.
+      # Add NOESY specific flags here.
+      # Ensure these defaults match how full_embedder_args is currently populated or expected.
+      # It's likely some defaults are already there from a base config or main model's settings.
+      # For now, just adding the new flags. The user needs to ensure other necessary InputEmbedder args are present.
+      atom_s: ${model.atom_s} # Example: inherit from top-level model config
+      atom_z: ${model.atom_z}
+      token_s: ${model.token_s} # This is the 'atom_s' for the InputEmbedder's own 'a' representation if no_atom_encoder
+      token_z: ${model.token_z} # This is the 'token_z' for InputEmbedder's atom pair features
+      atoms_per_window_queries: ${model.atoms_per_window_queries}
+      atoms_per_window_keys: ${model.atoms_per_window_keys}
+      atom_feature_dim: ${model.atom_feature_dim}
+      atom_encoder_depth: ${model.embedder_args.atom_encoder_depth} # Inherit from main embedder_args
+      atom_encoder_heads: ${model.embedder_args.atom_encoder_heads} # Inherit
+      no_atom_encoder: false             # Set to true if use_noesy_pipeline is true
+      use_noesy_pipeline: false        # If true, InputEmbedder (in Confidence) excludes MSA-features
+
+    msa_args: # Args for MSAModule within ConfidenceModule
+      # msa_s, msa_blocks, etc. are typically inherited or set to match main trunk.
+      # Add NOESY specific flags here.
+      msa_s: ${model.msa_args.msa_s} # Example: inherit from top-level msa_args
+      msa_blocks: ${model.msa_args.msa_blocks}
+      msa_dropout: ${model.msa_args.msa_dropout}
+      z_dropout: ${model.msa_args.z_dropout}
+      pairwise_head_width: ${model.msa_args.pairwise_head_width}
+      pairwise_num_heads: ${model.msa_args.pairwise_num_heads}
+      activation_checkpointing: ${model.msa_args.activation_checkpointing}
+      offload_to_cpu: ${model.msa_args.offload_to_cpu}
+      use_paired_feature: false # Or inherit: ${model.msa_args.use_paired_feature}
+      use_trifast: false # Or inherit: ${model.msa_args.use_trifast}
+
+      use_noesy: false                 # If true, MSAModule (in Confidence) uses NOESYModule
+      noesy_feature_dim: ${data.noesy_num_bins} # Must match data config
+      noesy_hidden_dim: null           # Optional hidden dim for NOESYModule's MLP
+
     num_dist_bins: 64
     max_dist: 22
     add_s_to_z_prod: true

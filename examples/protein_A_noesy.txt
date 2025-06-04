@@ -1,0 +1,31 @@
+# Example NOESY data for a hypothetical protein A
+# Format: residueFrom residueTo peakID distance atomFrom atomTo
+# Note: residue numbers are 1-based for this example file format.
+#       The parser will convert them to 0-based indices.
+
+# True Peaks (examples)
+5 10 1 3.5 H HA
+5 12 2 4.0 H HB2
+10 5 3 3.6 HA H  # Reciprocal to peak 1 (might be present or handled by symmetry in featurizer)
+15 20 4 2.8 HN HN
+20 22 5 4.5 HN HA
+
+# Ambiguous Peaks (sharing peakID 6)
+# Peak 6 could be between residue 25 (atom HE1) and residue 30 (atom HA)
+# OR between residue 25 (atom HE1) and residue 32 (atom HB)
+25 30 6 3.0 HE1 HA
+25 32 6 3.3 HE1 HB
+
+# Another set of ambiguous peaks (sharing peakID 7)
+# Peak 7 could be between 40 (HG1) and 45 (HD1)
+# OR between 40 (HG1) and 46 (HD2) due to close chemical shifts or noise
+40 45 7 2.5 HG1 HD1
+40 46 7 2.7 HG1 HD2
+
+# More true peaks
+50 55 8 4.2 HA HA
+30 35 9 3.9 HN HG2
+
+# A peak that might be considered noise (longer distance, or involving less common atoms if conventions were stricter)
+# The NOESY featurizer's max_dist (e.g. 5.0A) would filter this if it's beyond the cutoff.
+60 65 10 5.0 HG2 HE21

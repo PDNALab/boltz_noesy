@@ -1,0 +1,286 @@
+# Training configuration for protein structure prediction using sequence and NOESY data.
+# Aligned with scripts/train/configs/full.yaml structure for Boltz1 model.
+#
+# To use this for training:
+# 1. Ensure you have preprocessed PDB structures (target_dir).
+# 2. Ensure you have generated NOESY data files for your structures in `data.datasets[0].noesy_dir`.
+# 3. Set the `output` path for saving checkpoints and logs.
+# 4. Adjust other parameters as needed.
+
+output: ./outputs/train_noesy_experiment_full_config # Path to the output directory
+resume: null # Path to a checkpoint file to resume training
+
+# --- Data Configuration ---
+data:
+  _target_: boltz.data.module.training.DataConfig
+  datasets:
+    - _target_: boltz.data.module.training.DatasetConfig # Corrected target
+      name: my_protein_dataset_noesy
+      target_dir: PATH_TO_YOUR_PROCESSED_TARGETS_DIR # Ground truth structures
+      msa_dir: null # MSAs not used in NOESY pipeline
+      noesy_dir: PATH_TO_YOUR_NOESY_DATA_DIR # Directory with <id>_noesy.txt files
+      prob: 1.0
+      sampler:
+        _target_: boltz.data.sample.uniform.UniformSampler
+      cropper:
+        _target_: boltz.data.crop.boltz.BoltzCropper
+        min_neighborhood: 0
+        max_neighborhood: 40
+      # split: ./scripts/train/assets/validation_ids.txt # Optional validation split
+
+  # NOESY featurizer parameters
+  noesy_num_bins: 64
+  noesy_min_dist: 0.0
+  noesy_max_dist: 5.0 # Should match NOESY data generation/filtering
+
+  # Tokenizer and Featurizer (general)
+  tokenizer:
+    _target_: boltz.data.tokenize.boltz.BoltzTokenizer
+  featurizer:
+    _target_: boltz.data.feature.featurizer.BoltzFeaturizer
+
+
+  symmetries: null # Path to symmetry file, if any
+  max_tokens: 384    # Max sequence length per crop
+  max_atoms: 3456    # Max atoms per crop (related to max_tokens, e.g. max_tokens * 9 for protein)
+  # pad_to_max_tokens, pad_to_max_atoms, pad_to_max_seqs from structure.yaml example
+  pad_to_max_tokens: true
+  pad_to_max_atoms: true
+  pad_to_max_seqs: true # If MSAs were used; for NOESY, max_seqs might be less relevant.
+  max_seqs: 1 # No MSA stack effectively
+
+  samples_per_epoch: 100000 # Example value
+  batch_size: 1      # Adjust based on GPU memory
+  num_workers: 4     # Number of data loading workers
+  random_seed: 42
+  pin_memory: true
+  # prefetch_factor: 2 # Inferred from num_workers > 0
+  overfit: null
+  crop_validation: false # As in full.yaml, can be true
+  # return_train_symmetries, return_val_symmetries from structure.yaml example
+  return_train_symmetries: false
+  return_val_symmetries: true  # As in full.yaml
+  # train_binder_pocket_conditioned_prop etc. from structure.yaml example (if relevant)
+  train_binder_pocket_conditioned_prop: 0.0 # Example, adjust if needed
+  val_binder_pocket_conditioned_prop: 0.0   # Example, adjust if needed
+  binder_pocket_cutoff: 6.0
+  binder_pocket_sampling_geometric_p: 0.0
+  min_dist: 2.0 # For general distogram head, not NOESY specific
+  max_dist: 22.0# For general distogram head
+  num_bins: 64  # For general distogram head
+  atoms_per_window_queries: 32 # For InputEmbedder's AtomAttentionEncoder if used
+
+# --- Model Configuration (Boltz1) ---
+model:
+  _target_: boltz.model.model.Boltz1
+  # Core model dimensions (from full.yaml)
+  atom_s: 384  # Dimension of 'a' from InputEmbedder if no_atom_encoder=true. Also AAE internal dim.
+  atom_z: 16   # Pair dim for AAE.
+  token_s: 384 # Main single representation dimension (output of InputEmbedder projection, input to Pairformer).
+  token_z: 64  # Main pair representation dimension (output of MSAModule/NOESYModule, input to Pairformer).
+
+  # num_bins for general distogram head (if any, uses data.num_bins)
+  num_bins: ${data.num_bins}
+  atom_feature_dim: 77 # Input atom features for AtomAttentionEncoder (if used)
+  atoms_per_window_queries: ${data.atoms_per_window_queries}
+  atoms_per_window_keys: 128 # For AtomAttentionEncoder (if used)
+
+  ema: true
+  ema_decay: 0.999
+
+  # --- Sub-module configurations for NOESY Pipeline ---
+  embedder_args: # Args for InputEmbedder
+    # _target_ is not needed here as Boltz1 instantiates InputEmbedder directly
+    atom_encoder_depth: 2 # Example, not used if no_atom_encoder=true
+    atom_encoder_heads: 4 # Example, not used if no_atom_encoder=true
+    # NOESY Pipeline Active for InputEmbedder:
+    use_noesy_pipeline: true
+    no_atom_encoder: true    # 'a' becomes zeros of dim model.atom_s
+
+  msa_args: # Args for MSAModule (acts as NOESY processor)
+    # _target_ is not needed here
+    msa_s: ${model.token_s} # Not critical for NOESY path, but part of MSAModule signature.
+                            # Refers to dim of 's' projection if MSAs were used.
+    # s_input_dim: Output dim of InputEmbedder's 's' in NOESY mode
+    # Calculated as: model.atom_s + const.num_tokens (26) + len(const.pocket_contact_info) (4)
+    # Example: 384 + 26 + 4 = 414
+    s_input_dim: 414 # MUST BE SET ACCURATELY
+    # MSA specific params (not used in NOESY path, but part of signature)
+    msa_blocks: 4
+    msa_dropout: 0.15
+    z_dropout: 0.15 # Dropout for 'z' from NOESYModule can be applied in downstream modules
+    pairwise_head_width: 32
+    pairwise_num_heads: 4
+    activation_checkpointing: false # Typically false for inference/NOESY training if not needed
+    offload_to_cpu: false
+    use_paired_feature: false
+    use_trifast: true # Or false
+    # NOESY Pipeline Active for MSAModule:
+    use_noesy: true
+    noesy_feature_dim: ${data.noesy_num_bins} # From data config
+    noesy_hidden_dim: 128 # Example hidden dim for NOESYModule's MLP (can be null)
+
+  pairformer_args:
+    # _target_ is not needed here
+    # token_s should be ${model.token_s} (e.g. 384), assuming Trunk projects InputEmbedder output (414) to this.
+    # token_z should be ${model.token_z} (e.g. 64)
+    num_blocks: 8 # Example, adjust based on model size
+    num_heads: 16
+    dropout: 0.1 # Training dropout
+    pairwise_head_width: 32
+    pairwise_num_heads: 4
+    activation_checkpointing: false
+    use_trifast: true
+
+  score_model_args: # Args for StructureBuilder (diffusion model)
+    # _target_ is not needed here
+    # s_dim should be ${model.token_s}
+    # z_dim should be ${model.token_z}
+    diff_depth: 6
+    diff_num_blocks: 1
+    diff_num_layers: 3
+    diff_rbf_sigma: 0.5
+    diff_noise_schedule_type: "linear"
+    diff_num_steps: 1000 # Training diffusion steps
+    # ... other StructureBuilder parameters from full.yaml or your setup ...
+    sigma_data: 16 # from full.yaml
+    dim_fourier: 256 # from full.yaml
+    # atom_encoder_depth, atom_encoder_heads for score_model's internal encoders if different
+    # token_transformer_depth, token_transformer_heads from full.yaml
+    token_transformer_depth: 24
+    token_transformer_heads: 16
+    # atom_decoder_depth, atom_decoder_heads from full.yaml
+    atom_decoder_depth: 3
+    atom_decoder_heads: 4
+    conditioning_transition_layers: 2
+
+
+  # --- Confidence Prediction (NOESY-aware) ---
+  confidence_prediction: true
+  confidence_imitate_trunk: true # If true, ConfidenceModule uses its own Embedder & MSAModule
+  confidence_model_args:
+    # _target_ not needed if Boltz1 instantiates ConfidenceModule directly with these args
+    # token_s and token_z for ConfidenceModule will be ${model.token_s} and ${model.token_z}
+    # pairformer_args can be shared or specific:
+    pairformer_args: ${model.pairformer_args} # Example: reuse main pairformer_args
+    num_dist_bins: ${data.num_bins} # For distogram head in confidence
+    max_dist: ${data.max_dist}     # For distogram head in confidence
+    add_s_to_z_prod: true
+    add_s_input_to_s: true
+    use_s_diffusion: true
+    add_z_input_to_z: true
+
+    full_embedder_args: # For InputEmbedder within ConfidenceModule
+      # Inherit or set dimensions like atom_s, atom_z, token_s, token_z from model level or specify.
+      # For NOESY, these should enable the NOESY path:
+      atom_s: ${model.atom_s} # Or a specific value for confidence
+      atom_z: ${model.atom_z}
+      token_s: ${model.token_s}
+      token_z: ${model.token_z}
+      atoms_per_window_queries: ${model.atoms_per_window_queries}
+      atoms_per_window_keys: ${model.atoms_per_window_keys}
+      atom_feature_dim: ${model.atom_feature_dim}
+      atom_encoder_depth: ${model.embedder_args.atom_encoder_depth}
+      atom_encoder_heads: ${model.embedder_args.atom_encoder_heads}
+      use_noesy_pipeline: true
+      no_atom_encoder: true
+
+    msa_args: # For MSAModule within ConfidenceModule
+      msa_s: ${model.msa_args.msa_s} # Or specific value if different
+      token_z: ${model.token_z} # Crucially, this is the output Z dim for NOESYModule
+      # s_input_dim calculation for NOESY mode (e.g., model.atom_s + 26 + 4 = 414)
+      s_input_dim: 414 # MUST BE SET ACCURATELY based on confidence's full_embedder_args.atom_s (e.g. ${model.atom_s})
+      # Other msa_args (msa_blocks, etc.) are not used by NOESY path but kept for schema.
+      msa_blocks: ${model.msa_args.msa_blocks}
+      msa_dropout: ${model.msa_args.msa_dropout} # Not used in NOESY path
+      z_dropout: ${model.msa_args.z_dropout}   # Not used in NOESY path
+      pairwise_head_width: ${model.msa_args.pairwise_head_width} # Not used
+      pairwise_num_heads: ${model.msa_args.pairwise_num_heads}   # Not used
+      activation_checkpointing: ${model.msa_args.activation_checkpointing}
+      offload_to_cpu: ${model.msa_args.offload_to_cpu}
+      use_paired_feature: ${model.msa_args.use_paired_feature} # Not used
+      use_trifast: ${model.msa_args.use_trifast}               # Not used
+      # NOESY specific for confidence's MSAModule
+      use_noesy: true
+      noesy_feature_dim: ${data.noesy_num_bins}
+      noesy_hidden_dim: ${model.msa_args.noesy_hidden_dim} # Or specific for confidence
+
+    confidence_args: # pLDDT, PDE bins etc.
+      num_plddt_bins: 50
+      num_pde_bins: 64
+      num_pae_bins: 64
+      compute_pae: true
+
+
+  # --- Training, Validation, Diffusion Args (from full.yaml structure) ---
+  # Boltz1 takes these directly, not under a 'training_args' sub-key for these specific ones
+  recycling_steps: 3
+  # sampling_steps for validation is under validation_args in full.yaml
+  diffusion_multiplicity: 16 # Used by diffusion process
+  diffusion_samples: 2       # Used by diffusion process
+
+  # Loss weights
+  confidence_loss_weight: 1e-4 # If confidence_prediction is true
+  diffusion_loss_weight: 4.0
+  distogram_loss_weight: 3e-2
+
+  # LR and optimizer settings are top-level in Boltz1 config (already defined above)
+
+  validation_args:
+    recycling_steps: 3
+    sampling_steps: 200 # For generation during validation
+    diffusion_samples: 5
+    symmetry_correction: true
+    run_confidence_sequentially: false # As in full.yaml
+
+  diffusion_process_args:
+    sigma_min: 0.0004
+    sigma_max: 160.0
+    sigma_data: 16.0 # Same as score_model_args.sigma_data
+    rho: 7
+    P_mean: -1.2
+    P_std: 1.5
+    gamma_0: 0.8
+    gamma_min: 1.0
+    noise_scale: 1.0
+    step_scale: 1.0
+    coordinate_augmentation: true
+    alignment_reverse_diff: true
+    synchronize_sigmas: true
+    use_inference_model_cache: true # Usually false for training, true for inference
+
+  diffusion_loss_args:
+    add_smooth_lddt_loss: true
+    nucleotide_loss_weight: 5.0 # If applicable
+    ligand_loss_weight: 10.0    # If applicable
+
+# --- PyTorch Lightning Trainer Configuration ---
+trainer:
+  _target_: pytorch_lightning.Trainer
+  accelerator: gpu
+  devices: 1 # Or number of GPUs
+  max_epochs: 50
+  # precision: "16-mixed" # For mixed precision training
+  # strategy: "ddp" # For multi-GPU
+  gradient_clip_val: ${model.clip_grad_norm} # From model config
+  accumulate_grad_batches: 1 # Adjust for effective batch size
+
+# --- Notes on Dimensions for NOESY pipeline (repeated for emphasis) ---
+# 1. InputEmbedder (model.embedder_args with use_noesy_pipeline=true, no_atom_encoder=true):
+#    Output 's' dimension = model.atom_s + N_residue_types (26) + N_pocket_features (4)
+#                          Example: 384 + 26 + 4 = 414 (if model.atom_s = 384)
+# 2. MSAModule (model.msa_args with use_noesy=true):
+#    Input 's_input_dim' must match the dimension calculated above (e.g., 414).
+#    Output 'z' dimension = model.token_z (e.g., 64).
+# 3. PairformerModule (model.pairformer_args):
+#    Input 'token_s' should be model.token_s (e.g., 384). This implies that if InputEmbedder
+#    outputs 's' with dim 414, Boltz1/TrunkModule must project it to model.token_s (384)
+#    before passing to PairformerModule. This projection is internal to the model code.
+#    Input 'token_z' must be model.token_z (e.g., 64), matching MSAModule's output 'z'.
+# 4. StructureBuilder (model.score_model_args):
+#    Input 's_dim' should be model.token_s (e.g., 384).
+#    Input 'z_dim' should be model.token_z (e.g., 64).
+#
+# Ensure these dimensions are consistent with your Boltz1 and TrunkModule implementations.
+# Check BoltzLitModule and TrunkModule for how 's' is passed and potentially projected.
+```

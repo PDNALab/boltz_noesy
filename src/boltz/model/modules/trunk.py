@@ -19,6 +19,7 @@ from boltz.model.layers.triangular_mult import (
     TriangleMultiplicationOutgoing,
 )
 from boltz.model.modules.encoders import AtomAttentionEncoder
+from .noesy_module import NOESYModule # Added NOESYModule import
 
 
 class InputEmbedder(nn.Module):
@@ -36,6 +37,7 @@ class InputEmbedder(nn.Module):
         atom_encoder_depth: int,
         atom_encoder_heads: int,
         no_atom_encoder: bool = False,
+        use_noesy_pipeline: bool = False, # New flag
     ) -> None:
         """Initialize the input embedder.
 
@@ -66,7 +68,10 @@ class InputEmbedder(nn.Module):
         super().__init__()
         self.token_s = token_s
         self.no_atom_encoder = no_atom_encoder
+        self.use_noesy_pipeline = use_noesy_pipeline # Store the new flag
 
+        # atom_attention_encoder is initialized (or not) based on no_atom_encoder.
+        # The caller (main model) should set no_atom_encoder=True if use_noesy_pipeline is True.
         if not no_atom_encoder:
             self.atom_attention_encoder = AtomAttentionEncoder(
                 atom_s=atom_s,
@@ -97,19 +102,31 @@ class InputEmbedder(nn.Module):
         """
         # Load relevant features
         res_type = feats["res_type"]
-        profile = feats["profile"]
-        deletion_mean = feats["deletion_mean"].unsqueeze(-1)
+        # profile and deletion_mean are conditional
         pocket_feature = feats["pocket_feature"]
 
-        # Compute input embedding
+        # Compute 'a' (atom embedding or zeros)
+        # This part correctly uses self.no_atom_encoder, which should be set by the caller
+        # if use_noesy_pipeline is True.
         if self.no_atom_encoder:
             a = torch.zeros(
-                (res_type.shape[0], res_type.shape[1], self.token_s),
+                (res_type.shape[0], res_type.shape[1], self.token_s), # batch, seq_len, token_s
                 device=res_type.device,
             )
         else:
+            if not hasattr(self, 'atom_attention_encoder') or self.atom_attention_encoder is None:
+                raise RuntimeError("InputEmbedder: no_atom_encoder is False, but atom_attention_encoder is not initialized.")
             a, _, _, _, _ = self.atom_attention_encoder(feats)
-        s = torch.cat([a, res_type, profile, deletion_mean, pocket_feature], dim=-1)
+
+        # Conditionally concatenate features to form 's'
+        if not self.use_noesy_pipeline:
+            profile = feats["profile"]
+            deletion_mean = feats["deletion_mean"].unsqueeze(-1)
+            s = torch.cat([a, res_type, profile, deletion_mean, pocket_feature], dim=-1)
+        else:
+            # When using NOESY pipeline, MSA-derived features (profile, deletion_mean) are excluded
+            s = torch.cat([a, res_type, pocket_feature], dim=-1)
+
         return s
 
 
@@ -130,6 +147,10 @@ class MSAModule(nn.Module):
         use_paired_feature: bool = False,
         offload_to_cpu: bool = False,
         use_trifast: bool = False,
+        # NOESY related parameters
+        use_noesy: bool = False,
+        noesy_feature_dim: Optional[int] = None,
+        noesy_hidden_dim: Optional[int] = None,
         **kwargs,
     ) -> None:
         """Initialize the MSA module.
@@ -165,47 +186,49 @@ class MSAModule(nn.Module):
         self.msa_dropout = msa_dropout
         self.z_dropout = z_dropout
         self.use_paired_feature = use_paired_feature
+        self.use_noesy = use_noesy
+        self.noesy_module: Optional[NOESYModule] = None
 
-        self.s_proj = nn.Linear(s_input_dim, msa_s, bias=False)
-        self.msa_proj = nn.Linear(
-            const.num_tokens + 2 + int(use_paired_feature),
-            msa_s,
-            bias=False,
-        )
-        self.layers = nn.ModuleList()
-        for i in range(msa_blocks):
-            if activation_checkpointing:
-                self.layers.append(
-                    checkpoint_wrapper(
-                        MSALayer(
-                            msa_s,
-                            token_z,
-                            msa_dropout,
-                            z_dropout,
-                            pairwise_head_width,
-                            pairwise_num_heads,
-                            use_trifast=use_trifast,
-                        ),
-                        offload_to_cpu=offload_to_cpu,
-                    )
+        if self.use_noesy:
+            if noesy_feature_dim is None:
+                raise ValueError("noesy_feature_dim must be provided if use_noesy is True.")
+            self.noesy_module = NOESYModule(
+                noesy_feature_dim=noesy_feature_dim,
+                token_z_dim=token_z, # token_z is the pair dimension for MSAModule output
+                noesy_hidden_dim=noesy_hidden_dim
+            )
+            # Nullify or don't initialize MSA-specific layers if not needed
+            self.s_proj = None
+            self.msa_proj = None
+            self.layers = nn.ModuleList() # Empty list
+        else:
+            self.s_proj = nn.Linear(s_input_dim, msa_s, bias=False)
+            self.msa_proj = nn.Linear(
+                const.num_tokens + 2 + int(use_paired_feature),
+                msa_s,
+                bias=False,
+            )
+            self.layers = nn.ModuleList()
+            for i in range(msa_blocks):
+                layer_constructor_args = (
+                    msa_s, token_z, msa_dropout, z_dropout,
+                    pairwise_head_width, pairwise_num_heads
                 )
-            else:
-                self.layers.append(
-                    MSALayer(
-                        msa_s,
-                        token_z,
-                        msa_dropout,
-                        z_dropout,
-                        pairwise_head_width,
-                        pairwise_num_heads,
-                        use_trifast=use_trifast,
-                    )
-                )
+                # Adding use_trifast to MSALayer call if it was missing
+                msa_layer = MSALayer(*layer_constructor_args, use_trifast=use_trifast)
+
+
+                if activation_checkpointing:
+                    self.layers.append(checkpoint_wrapper(msa_layer, offload_to_cpu=offload_to_cpu))
+                else:
+                    self.layers.append(msa_layer)
+            self.noesy_module = None
+
 
     def forward(
         self,
-        z: Tensor,
-        emb: Tensor,
+        z: Tensor, # Input z, may be ignored if NOESY is used
+        emb: Tensor, # Input s (single_rep), may be ignored if NOESY is used
         feats: Dict[str, Tensor],
     ) -> Tensor:
         """Perform the forward pass.
@@ -226,8 +249,26 @@ class MSAModule(nn.Module):
 
         """
         # Set chunk sizes
+        # If using NOESY, z might come directly from noesy_module, shape check might need adjustment
+        # or ensure noesy_module output z has compatible shape for this check if it still runs.
+
+        if self.use_noesy:
+            if self.noesy_module is None:
+                raise RuntimeError("use_noesy is True, but noesy_module is not initialized.")
+            noesy_feat = feats.get("noesy_feat")
+            if noesy_feat is None:
+                raise ValueError("use_noesy is True, but 'noesy_feat' not found in feats.")
+            # The input 'z' and 'emb' to this forward method are effectively ignored.
+            # NOESY module directly produces the pair representation 'z'.
+            return self.noesy_module(noesy_feat)
+
+        # Original MSAModule forward logic starts here if not use_noesy
         if not self.training:
-            if z.shape[1] > const.chunk_size_threshold:
+            # Original z is used here.
+            # Make sure z is not None and has a shape attribute.
+            # If z could be None from a prior step when noesy is not used, this needs a check.
+            # Assuming z is always a Tensor here.
+            if z is not None and z.shape[1] > const.chunk_size_threshold:
                 chunk_heads_pwa = True
                 chunk_size_transition_z = 64
                 chunk_size_transition_msa = 32

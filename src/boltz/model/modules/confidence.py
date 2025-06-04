@@ -81,7 +81,12 @@ class ConfidenceModule(nn.Module):
         self.register_buffer("boundaries", boundaries)
         self.dist_bin_pairwise_embed = nn.Embedding(num_dist_bins, token_z)
         init.gating_init_(self.dist_bin_pairwise_embed.weight)
-        s_input_dim = (
+
+        # This s_input_dim is for the non-imitate_trunk path's s_to_z layers
+        # It assumes full features from s_inputs.
+        # If s_inputs source changes due to NOESY, this might also need adjustment,
+        # but the prompt focuses on imitate_trunk=True.
+        s_input_dim_non_trunk = (
             token_s + 2 * const.num_tokens + 1 + len(const.pocket_contact_info)
         )
 
@@ -91,28 +96,52 @@ class ConfidenceModule(nn.Module):
             self.s_diffusion_to_s = LinearNoBias(2 * token_s, token_s)
             init.gating_init_(self.s_diffusion_to_s.weight)
 
-        self.s_to_z = LinearNoBias(s_input_dim, token_z)
-        self.s_to_z_transpose = LinearNoBias(s_input_dim, token_z)
+        self.s_to_z = LinearNoBias(s_input_dim_non_trunk, token_z) # Use s_input_dim_non_trunk
+        self.s_to_z_transpose = LinearNoBias(s_input_dim_non_trunk, token_z) # Use s_input_dim_non_trunk
         init.gating_init_(self.s_to_z.weight)
         init.gating_init_(self.s_to_z_transpose.weight)
 
         self.add_s_to_z_prod = add_s_to_z_prod
         if add_s_to_z_prod:
-            self.s_to_z_prod_in1 = LinearNoBias(s_input_dim, token_z)
-            self.s_to_z_prod_in2 = LinearNoBias(s_input_dim, token_z)
+            self.s_to_z_prod_in1 = LinearNoBias(s_input_dim_non_trunk, token_z) # Use s_input_dim_non_trunk
+            self.s_to_z_prod_in2 = LinearNoBias(s_input_dim_non_trunk, token_z) # Use s_input_dim_non_trunk
             self.s_to_z_prod_out = LinearNoBias(token_z, token_z)
             init.gating_init_(self.s_to_z_prod_out.weight)
 
         self.imitate_trunk = imitate_trunk
         if self.imitate_trunk:
-            s_input_dim = (
-                token_s + 2 * const.num_tokens + 1 + len(const.pocket_contact_info)
-            )
-            self.s_init = nn.Linear(s_input_dim, token_s, bias=False)
-            self.z_init_1 = nn.Linear(s_input_dim, token_z, bias=False)
-            self.z_init_2 = nn.Linear(s_input_dim, token_z, bias=False)
+            if full_embedder_args is None:
+                raise ValueError("full_embedder_args must be provided if imitate_trunk is True.")
+            if msa_args is None:
+                raise ValueError("msa_args must be provided if imitate_trunk is True.")
+
+            # Determine if NOESY pipeline is active for the internal InputEmbedder
+            # This flag should be passed within full_embedder_args by the main model config
+            use_noesy_for_embedder = full_embedder_args.get('use_noesy_pipeline', False)
+
+            # The 'atom_s' for InputEmbedder is typically 'token_s' of ConfidenceModule
+            # or specified in full_embedder_args.
+            # Default to ConfidenceModule's token_s if not in full_embedder_args.
+            embedder_atom_s_dim = full_embedder_args.get('atom_s', token_s)
+
+            if use_noesy_for_embedder:
+                # s = torch.cat([a, res_type, pocket_feature], dim=-1)
+                # 'a' has dim embedder_atom_s_dim
+                # 'res_type' has dim const.num_tokens
+                # 'pocket_feature' has dim len(const.pocket_contact_info)
+                calculated_s_input_dim = embedder_atom_s_dim + const.num_tokens + len(const.pocket_contact_info)
+            else:
+                # s = torch.cat([a, res_type, profile, deletion_mean, pocket_feature], dim=-1)
+                # 'profile' has dim const.num_tokens
+                # 'deletion_mean' has dim 1
+                calculated_s_input_dim = embedder_atom_s_dim + const.num_tokens + const.num_tokens + 1 + len(const.pocket_contact_info)
+
+            self.s_init = nn.Linear(calculated_s_input_dim, token_s, bias=False)
+            self.z_init_1 = nn.Linear(calculated_s_input_dim, token_z, bias=False)
+            self.z_init_2 = nn.Linear(calculated_s_input_dim, token_z, bias=False)
 
             # Input embeddings
+            # Ensure full_embedder_args contains use_noesy_pipeline and no_atom_encoder set correctly by caller
             self.input_embedder = InputEmbedder(**full_embedder_args)
             self.rel_pos = RelativePositionEncoder(token_z)
             self.token_bonds = nn.Linear(1, token_z, bias=False)
@@ -128,9 +157,11 @@ class ConfidenceModule(nn.Module):
             init.gating_init_(self.z_recycle.weight)
 
             # Pairwise stack
+            # msa_args should contain use_noesy, noesy_feature_dim, etc.
+            # MSAModule's s_input_dim is the dimension of 's' from InputEmbedder (calculated_s_input_dim)
             self.msa_module = MSAModule(
                 token_z=token_z,
-                s_input_dim=s_input_dim,
+                s_input_dim=calculated_s_input_dim, # Pass the dynamically calculated dim
                 **msa_args,
             )
             self.pairformer_module = PairformerModule(

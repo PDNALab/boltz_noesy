@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any # Added Any
+import logging # Added logging
 
 import numpy as np
 import pytorch_lightning as pl
@@ -16,6 +17,12 @@ from boltz.data.filter.dynamic.filter import DynamicFilter
 from boltz.data.sample.sampler import Sample, Sampler
 from boltz.data.tokenize.tokenizer import Tokenizer
 from boltz.data.types import MSA, Connection, Input, Manifest, Record, Structure
+# Added NOESY imports
+from boltz.data.noesy.parser import NOESYParser
+from boltz.data.noesy.feature import NOESYFeature
+
+
+logger = logging.getLogger(__name__) # Added logger
 
 
 @dataclass
@@ -27,9 +34,10 @@ class DatasetConfig:
     prob: float
     sampler: Sampler
     cropper: Cropper
-    filters: Optional[list] = None
+    filters: Optional[list[Any]] = None # Assuming list contains various filter types
     split: Optional[str] = None
     manifest_path: Optional[str] = None
+    noesy_dir: Optional[str] = None  # Per-dataset NOESY directory
 
 
 @dataclass
@@ -53,6 +61,12 @@ class DataConfig:
     min_dist: float
     max_dist: float
     num_bins: int
+    # NOESY related global config
+    noesy_dir: Optional[str] = None
+    noesy_num_bins: int = 64
+    noesy_min_dist: float = 0.0
+    noesy_max_dist: float = 5.0
+    noesy_noise_threshold: Optional[float] = None
     overfit: Optional[int] = None
     pad_to_max_tokens: bool = False
     pad_to_max_atoms: bool = False
@@ -79,6 +93,7 @@ class Dataset:
     cropper: Cropper
     tokenizer: Tokenizer
     featurizer: BoltzFeaturizer
+    noesy_dir: Optional[Path] = None # Effective NOESY dir for this dataset instance
 
 
 def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
@@ -188,7 +203,7 @@ class TrainingDataset(torch.utils.data.Dataset):
 
     def __init__(
         self,
-        datasets: list[Dataset],
+        datasets: list[Dataset], # This is BoltzTrainingDataModule.Dataset
         samples_per_epoch: int,
         symmetries: dict,
         max_atoms: int,
@@ -207,10 +222,14 @@ class TrainingDataset(torch.utils.data.Dataset):
         binder_pocket_sampling_geometric_p: Optional[float] = 0.0,
         return_symmetries: Optional[bool] = False,
         compute_constraint_features: bool = False,
+        # NOESY related args passed from BoltzTrainingDataModule
+        noesy_parser: Optional[NOESYParser] = None,
+        noesy_featurizer: Optional[NOESYFeature] = None,
+        noesy_num_bins: int = 64,
     ) -> None:
         """Initialize the training dataset."""
         super().__init__()
-        self.datasets = datasets
+        self.datasets = datasets # List of BoltzTrainingDataModule.Dataset objects
         self.probs = [d.prob for d in datasets]
         self.samples_per_epoch = samples_per_epoch
         self.symmetries = symmetries
@@ -229,12 +248,19 @@ class TrainingDataset(torch.utils.data.Dataset):
         self.binder_pocket_sampling_geometric_p = binder_pocket_sampling_geometric_p
         self.return_symmetries = return_symmetries
         self.compute_constraint_features = compute_constraint_features
+
+        # Store NOESY related objects
+        self.noesy_parser = noesy_parser
+        self.noesy_featurizer = noesy_featurizer
+        # noesy_num_bins is used for placeholder if featurizer is None but NOESY is globally expected
+        self.noesy_num_bins = noesy_num_bins
+
         self.samples = []
-        for dataset in datasets:
-            records = dataset.manifest.records
+        for dataset_obj in datasets: # dataset_obj is an instance of BoltzTrainingDataModule.Dataset
+            records = dataset_obj.manifest.records
             if overfit is not None:
                 records = records[:overfit]
-            iterator = dataset.sampler.sample(records, np.random)
+            iterator = dataset_obj.sampler.sample(records, np.random) # Use dataset_obj
             self.samples.append(iterator)
 
     def __getitem__(self, idx: int) -> dict[str, Tensor]:
@@ -256,31 +282,31 @@ class TrainingDataset(torch.utils.data.Dataset):
             len(self.datasets),
             p=self.probs,
         )
-        dataset = self.datasets[dataset_idx]
+        current_dataset = self.datasets[dataset_idx] # current_dataset is a BoltzTrainingDataModule.Dataset instance
 
         # Get a sample from the dataset
         sample: Sample = next(self.samples[dataset_idx])
 
         # Get the structure
         try:
-            input_data = load_input(sample.record, dataset.target_dir, dataset.msa_dir)
+            input_data = load_input(sample.record, current_dataset.target_dir, current_dataset.msa_dir)
         except Exception as e:
-            print(
+            logger.error( # Use logger
                 f"Failed to load input for {sample.record.id} with error {e}. Skipping."
             )
             return self.__getitem__(idx)
 
         # Tokenize structure
         try:
-            tokenized = dataset.tokenizer.tokenize(input_data)
+            tokenized = current_dataset.tokenizer.tokenize(input_data)
         except Exception as e:
-            print(f"Tokenizer failed on {sample.record.id} with error {e}. Skipping.")
+            logger.error(f"Tokenizer failed on {sample.record.id} with error {e}. Skipping.") # Use logger
             return self.__getitem__(idx)
 
         # Compute crop
         try:
             if self.max_tokens is not None:
-                tokenized = dataset.cropper.crop(
+                tokenized = current_dataset.cropper.crop( # Use current_dataset
                     tokenized,
                     max_atoms=self.max_atoms,
                     max_tokens=self.max_tokens,
@@ -289,17 +315,18 @@ class TrainingDataset(torch.utils.data.Dataset):
                     interface_id=sample.interface_id,
                 )
         except Exception as e:
-            print(f"Cropper failed on {sample.record.id} with error {e}. Skipping.")
+            logger.error(f"Cropper failed on {sample.record.id} with error {e}. Skipping.") # Use logger
             return self.__getitem__(idx)
 
         # Check if there are tokens
         if len(tokenized.tokens) == 0:
-            msg = "No tokens in cropped structure."
-            raise ValueError(msg)
+            # This case should ideally be filtered out by a prior filter step if possible
+            logger.warning(f"No tokens in cropped structure for {sample.record.id}. Skipping.")
+            return self.__getitem__(idx) # Skip sample
 
         # Compute features
         try:
-            features = dataset.featurizer.process(
+            features = current_dataset.featurizer.process( # Use current_dataset
                 tokenized,
                 training=True,
                 max_atoms=self.max_atoms if self.pad_to_max_atoms else None,
@@ -318,9 +345,52 @@ class TrainingDataset(torch.utils.data.Dataset):
                 compute_constraint_features=self.compute_constraint_features,
             )
         except Exception as e:
-            print(f"Featurizer failed on {sample.record.id} with error {e}. Skipping.")
+            logger.error(f"Featurizer failed on {sample.record.id} with error {e}. Skipping.") # Use logger
             return self.__getitem__(idx)
 
+        # Add NOESY features
+        # Determine sequence length from existing features (e.g., after cropping by main featurizer)
+        # 'coords_mask' is a good candidate if it represents per-residue presence (L, )
+        if "coords_mask" not in features:
+            logger.error(f"Key 'coords_mask' not found in features for {sample.record.id}. Cannot determine sequence length for NOESY. Skipping NOESY.")
+            # Ensure 'noesy_feat' still exists if expected by collate fn
+            # Fallback sequence length or handle error appropriately
+            # For now, if this happens, we can't create a meaningful placeholder of correct L.
+            # This indicates a bigger issue if coords_mask is always expected.
+            # However, the collate function might handle missing keys or None values.
+            # For safety in batching, a zero-length or predefined small placeholder might be added,
+            # or an error raised. Let's assume coords_mask will be present.
+            # If not, the code below will fail.
+            pass # Let it fail if coords_mask is missing, to highlight the issue.
+
+        sequence_length = features["coords_mask"].shape[0]
+
+        noesy_feat_tensor = torch.zeros((sequence_length, sequence_length, self.noesy_num_bins), dtype=torch.float32)
+
+        if self.noesy_parser and self.noesy_featurizer: # Check if NOESY processing is globally enabled
+            if current_dataset.noesy_dir: # Check if the current dataset has a NOESY dir configured
+                target_id = sample.record.id
+                # Assume NOESY filename convention: <pdb_id>_noesy.txt (e.g. 1abc_noesy.txt)
+                # target_id might be "1ABC_A", so take the first part.
+                noesy_filename_candidate = target_id.split('_')[0].lower() + "_noesy.txt"
+                noesy_file_path = current_dataset.noesy_dir / noesy_filename_candidate
+
+                if noesy_file_path.exists():
+                    try:
+                        parsed_noesy = self.noesy_parser.parse(str(noesy_file_path))
+                        if parsed_noesy and parsed_noesy.get('peaks'): # Check if parsing yielded any peaks
+                            noesy_feat_tensor = self.noesy_featurizer.featurize(parsed_noesy, sequence_length)
+                        else:
+                            logger.warning(f"NOESY file {noesy_file_path} parsed but no peaks found. Using placeholder.")
+                    except Exception as e:
+                        logger.error(f"NOESY processing failed for {noesy_file_path}: {e}. Using placeholder.")
+                else:
+                    logger.warning(f"NOESY file not found: {noesy_file_path}. Using placeholder.")
+            # else: No NOESY dir for this specific dataset, use placeholder.
+            # logger.debug implicitly handled by not entering the 'if current_dataset.noesy_dir:'
+        # else: NOESY not configured at module level (parser/featurizer are None), so use placeholder.
+
+        features['noesy_feat'] = noesy_feat_tensor
         return features
 
     def __len__(self) -> int:
@@ -340,7 +410,7 @@ class ValidationDataset(torch.utils.data.Dataset):
 
     def __init__(
         self,
-        datasets: list[Dataset],
+        datasets: list[Dataset], # This is BoltzTrainingDataModule.Dataset
         seed: int,
         symmetries: dict,
         max_atoms: Optional[int] = None,
@@ -359,10 +429,14 @@ class ValidationDataset(torch.utils.data.Dataset):
         binder_pocket_conditioned_prop: Optional[float] = 0.0,
         binder_pocket_cutoff: Optional[float] = 6.0,
         compute_constraint_features: bool = False,
+        # NOESY related args passed from BoltzTrainingDataModule
+        noesy_parser: Optional[NOESYParser] = None,
+        noesy_featurizer: Optional[NOESYFeature] = None,
+        noesy_num_bins: int = 64,
     ) -> None:
         """Initialize the validation dataset."""
         super().__init__()
-        self.datasets = datasets
+        self.datasets = datasets # List of BoltzTrainingDataModule.Dataset objects
         self.max_atoms = max_atoms
         self.max_tokens = max_tokens
         self.max_seqs = max_seqs
@@ -383,6 +457,11 @@ class ValidationDataset(torch.utils.data.Dataset):
         self.binder_pocket_cutoff = binder_pocket_cutoff
         self.compute_constraint_features = compute_constraint_features
 
+        # Store NOESY related objects
+        self.noesy_parser = noesy_parser
+        self.noesy_featurizer = noesy_featurizer
+        self.noesy_num_bins = noesy_num_bins
+
     def __getitem__(self, idx: int) -> dict[str, Tensor]:
         """Get an item from the dataset.
 
@@ -398,55 +477,62 @@ class ValidationDataset(torch.utils.data.Dataset):
 
         """
         # Pick dataset based on idx
-        for dataset in self.datasets:
-            size = len(dataset.manifest.records)
+        current_dataset_val = None
+        temp_idx = idx # Use a temp variable for idx manipulation
+        for ds_val_loop in self.datasets: # ds_val_loop is BoltzTrainingDataModule.Dataset
+            size = len(ds_val_loop.manifest.records)
             if self.overfit is not None:
                 size = min(size, self.overfit)
-            if idx < size:
+            if temp_idx < size:
+                current_dataset_val = ds_val_loop
+                idx = temp_idx # Update idx to be relative to the chosen dataset
                 break
-            idx -= size
+            temp_idx -= size
+
+        if current_dataset_val is None:
+            raise IndexError(f"ValidationDataset index {idx} out of bounds.")
 
         # Get a sample from the dataset
-        record = dataset.manifest.records[idx]
+        record = current_dataset_val.manifest.records[idx]
 
         # Get the structure
         try:
-            input_data = load_input(record, dataset.target_dir, dataset.msa_dir)
+            input_data = load_input(record, current_dataset_val.target_dir, current_dataset_val.msa_dir)
         except Exception as e:
-            print(f"Failed to load input for {record.id} with error {e}. Skipping.")
-            return self.__getitem__(0)
+            logger.error(f"Failed to load input for {record.id} with error {e}. Skipping.") # Use logger
+            return self.__getitem__(0) # Risk of recursion depth, but follows existing pattern
 
         # Tokenize structure
         try:
-            tokenized = dataset.tokenizer.tokenize(input_data)
+            tokenized = current_dataset_val.tokenizer.tokenize(input_data)
         except Exception as e:
-            print(f"Tokenizer failed on {record.id} with error {e}. Skipping.")
+            logger.error(f"Tokenizer failed on {record.id} with error {e}. Skipping.") # Use logger
             return self.__getitem__(0)
 
         # Compute crop
         try:
             if self.crop_validation and (self.max_tokens is not None):
-                tokenized = dataset.cropper.crop(
+                tokenized = current_dataset_val.cropper.crop( # Use current_dataset_val
                     tokenized,
                     max_tokens=self.max_tokens,
-                    random=self.random,
+                    random=self.random, # self.random should be used for val
                     max_atoms=self.max_atoms,
                 )
         except Exception as e:
-            print(f"Cropper failed on {record.id} with error {e}. Skipping.")
+            logger.error(f"Cropper failed on {record.id} with error {e}. Skipping.") # Use logger
             return self.__getitem__(0)
 
         # Check if there are tokens
         if len(tokenized.tokens) == 0:
-            msg = "No tokens in cropped structure."
-            raise ValueError(msg)
+            logger.warning(f"No tokens in cropped structure for {record.id} (validation). Skipping.")
+            return self.__getitem__(0) # Skip sample
 
         # Compute features
         try:
             pad_atoms = self.crop_validation and self.pad_to_max_atoms
             pad_tokens = self.crop_validation and self.pad_to_max_tokens
 
-            features = dataset.featurizer.process(
+            features = current_dataset_val.featurizer.process( # Use current_dataset_val
                 tokenized,
                 training=False,
                 max_atoms=self.max_atoms if pad_atoms else None,
@@ -466,9 +552,36 @@ class ValidationDataset(torch.utils.data.Dataset):
                 compute_constraint_features=self.compute_constraint_features,
             )
         except Exception as e:
-            print(f"Featurizer failed on {record.id} with error {e}. Skipping.")
+            logger.error(f"Featurizer failed on {record.id} with error {e}. Skipping.") # Use logger
             return self.__getitem__(0)
 
+        # Add NOESY features (similar to TrainingDataset)
+        if "coords_mask" not in features:
+             logger.error(f"Key 'coords_mask' not found in features for {record.id} (validation). Cannot determine sequence length for NOESY. Skipping NOESY.")
+             pass # Let it fail if coords_mask is missing or handle as in training
+
+        sequence_length = features["coords_mask"].shape[0]
+        noesy_feat_tensor = torch.zeros((sequence_length, sequence_length, self.noesy_num_bins), dtype=torch.float32)
+
+        if self.noesy_parser and self.noesy_featurizer:
+            if current_dataset_val.noesy_dir:
+                target_id = record.id
+                noesy_filename_candidate = target_id.split('_')[0].lower() + "_noesy.txt"
+                noesy_file_path = current_dataset_val.noesy_dir / noesy_filename_candidate
+
+                if noesy_file_path.exists():
+                    try:
+                        parsed_noesy = self.noesy_parser.parse(str(noesy_file_path))
+                        if parsed_noesy and parsed_noesy.get('peaks'):
+                             noesy_feat_tensor = self.noesy_featurizer.featurize(parsed_noesy, sequence_length)
+                        else:
+                            logger.warning(f"NOESY file {noesy_file_path} parsed (validation) but no peaks found. Using placeholder.")
+                    except Exception as e:
+                        logger.error(f"NOESY processing failed for {noesy_file_path} (validation): {e}. Using placeholder.")
+                else:
+                    logger.warning(f"NOESY file not found: {noesy_file_path} (validation). Using placeholder.")
+
+        features['noesy_feat'] = noesy_feat_tensor
         return features
 
     def __len__(self) -> int:
@@ -508,25 +621,62 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
         # Load symmetries
         symmetries = get_symmetries(cfg.symmetries)
 
-        # Load datasets
-        train: list[Dataset] = []
-        val: list[Dataset] = []
+        # Initialize NOESY parser and featurizer if configured
+        self.noesy_parser: Optional[NOESYParser] = None
+        self.noesy_featurizer: Optional[NOESYFeature] = None
 
-        for data_config in cfg.datasets:
+        any_noesy_configured = False
+        if self.cfg.noesy_dir: # Global config
+            any_noesy_configured = True
+        else:
+            for dc_cfg in self.cfg.datasets: # Per-dataset config
+                if dc_cfg.noesy_dir:
+                    any_noesy_configured = True
+                    break
+
+        if any_noesy_configured:
+            self.noesy_parser = NOESYParser() # Uses default __init__ args
+            self.noesy_featurizer = NOESYFeature(
+                num_bins=self.cfg.noesy_num_bins,
+                min_dist=self.cfg.noesy_min_dist,
+                max_dist=self.cfg.noesy_max_dist,
+                noise_threshold=self.cfg.noesy_noise_threshold
+            )
+            logger.info("NOESY Parser and Featurizer initialized with num_bins=%d, dist_range=(%.1f, %.1f)",
+                        self.cfg.noesy_num_bins, self.cfg.noesy_min_dist, self.cfg.noesy_max_dist)
+
+
+        # Load datasets
+        train: list[Dataset] = [] # This Dataset is BoltzTrainingDataModule.Dataset
+        val: list[Dataset] = []   # This Dataset is BoltzTrainingDataModule.Dataset
+
+        for dataset_conf in cfg.datasets: # dataset_conf is DatasetConfig from cfg
             # Set target_dir
-            target_dir = Path(data_config.target_dir)
-            msa_dir = Path(data_config.msa_dir)
+            target_dir = Path(dataset_conf.target_dir)
+            msa_dir = Path(dataset_conf.msa_dir)
+
+            # Determine effective NOESY directory for this dataset
+            effective_noesy_dir: Optional[Path] = None
+            if dataset_conf.noesy_dir: # Per-dataset path takes precedence
+                effective_noesy_dir = Path(dataset_conf.noesy_dir)
+            elif cfg.noesy_dir: # Fallback to global path
+                effective_noesy_dir = Path(cfg.noesy_dir)
+
+            if effective_noesy_dir and not any_noesy_configured:
+                # This case should ideally not be hit if any_noesy_configured is derived correctly
+                logger.warning(f"Effective NOESY dir {effective_noesy_dir} found, but parser/featurizer not initialized.")
+
 
             # Load manifest
-            if data_config.manifest_path is not None:
-                path = Path(data_config.manifest_path)
+            if dataset_conf.manifest_path is not None:
+                path = Path(dataset_conf.manifest_path)
             else:
                 path = target_dir / "manifest.json"
             manifest: Manifest = Manifest.load(path)
 
             # Split records if given
-            if data_config.split is not None:
-                with Path(data_config.split).open("r") as f:
+            if dataset_conf.split is not None:
+                with Path(dataset_conf.split).open("r") as f:
                     split = {x.lower() for x in f.read().splitlines()}
 
                 train_records = []
@@ -546,26 +696,27 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
                 for record in train_records
                 if all(f.filter(record) for f in cfg.filters)
             ]
-            # Filter training records
-            if data_config.filters is not None:
+            # Filter training records based on per-dataset filters
+            if dataset_conf.filters is not None:
                 train_records = [
                     record
                     for record in train_records
-                    if all(f.filter(record) for f in data_config.filters)
+                    if all(f.filter(record) for f in dataset_conf.filters)
                 ]
 
             # Create train dataset
             train_manifest = Manifest(train_records)
             train.append(
-                Dataset(
-                    target_dir,
-                    msa_dir,
-                    train_manifest,
-                    data_config.prob,
-                    data_config.sampler,
-                    data_config.cropper,
-                    cfg.tokenizer,
-                    cfg.featurizer,
+                Dataset( # This is BoltzTrainingDataModule.Dataset dataclass
+                    target_dir=target_dir,
+                    msa_dir=msa_dir,
+                    manifest=train_manifest,
+                    prob=dataset_conf.prob,
+                    sampler=dataset_conf.sampler,
+                    cropper=dataset_conf.cropper,
+                    tokenizer=cfg.tokenizer,
+                    featurizer=cfg.featurizer,
+                    noesy_dir=effective_noesy_dir # Pass effective NOESY dir
                 )
             )
 
@@ -573,15 +724,17 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
             if val_records:
                 val_manifest = Manifest(val_records)
                 val.append(
-                    Dataset(
-                        target_dir,
-                        msa_dir,
-                        val_manifest,
-                        data_config.prob,
-                        data_config.sampler,
-                        data_config.cropper,
-                        cfg.tokenizer,
-                        cfg.featurizer,
+                    Dataset( # This is BoltzTrainingDataModule.Dataset dataclass
+                        target_dir=target_dir,
+                        msa_dir=msa_dir,
+                        manifest=val_manifest,
+                        # prob here might not be used if val set is just all val_records
+                        prob=dataset_conf.prob,
+                        sampler=dataset_conf.sampler, # Sampler might differ for val
+                        cropper=dataset_conf.cropper, # Cropper might differ for val
+                        tokenizer=cfg.tokenizer,
+                        featurizer=cfg.featurizer,
+                        noesy_dir=effective_noesy_dir # Pass effective NOESY dir
                     )
                 )
 
@@ -597,6 +750,7 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
         # Create wrapper datasets
         self._train_set = TrainingDataset(
             datasets=train,
+            datasets=train, # This is list of BoltzTrainingDataModule.Dataset
             samples_per_epoch=cfg.samples_per_epoch,
             max_atoms=cfg.max_atoms,
             max_tokens=cfg.max_tokens,
@@ -614,9 +768,13 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
             binder_pocket_cutoff=cfg.binder_pocket_cutoff,
             binder_pocket_sampling_geometric_p=cfg.binder_pocket_sampling_geometric_p,
             return_symmetries=cfg.return_train_symmetries,
+            # Pass NOESY related objects and parameters from BoltzTrainingDataModule
+            noesy_parser=self.noesy_parser,
+            noesy_featurizer=self.noesy_featurizer,
+            noesy_num_bins=self.cfg.noesy_num_bins
         )
         self._val_set = ValidationDataset(
-            datasets=train if cfg.overfit is not None else val,
+            datasets=train if cfg.overfit is not None else val, # This is list of BoltzTrainingDataModule.Dataset
             seed=cfg.random_seed,
             max_atoms=cfg.max_atoms,
             max_tokens=cfg.max_tokens,
@@ -634,6 +792,10 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
             return_symmetries=cfg.return_val_symmetries,
             binder_pocket_conditioned_prop=cfg.val_binder_pocket_conditioned_prop,
             binder_pocket_cutoff=cfg.binder_pocket_cutoff,
+            # Pass NOESY related objects and parameters from BoltzTrainingDataModule
+            noesy_parser=self.noesy_parser,
+            noesy_featurizer=self.noesy_featurizer,
+            noesy_num_bins=self.cfg.noesy_num_bins
         )
 
     def setup(self, stage: Optional[str] = None) -> None:

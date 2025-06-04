@@ -1,0 +1,161 @@
+# Inference configuration for protein structure prediction using sequence and NOESY data
+#
+# To run inference with this configuration:
+# 1. Fill in the `sequence` for your protein.
+# 2. Provide the path to your NOESY data file in `data.noesy_file`.
+# 3. Specify the path to your trained model checkpoint in `model_checkpoint_path`.
+# 4. Run the prediction script (e.g., python scripts/predict.py --config examples/prot_noesy_inference.yaml ...)
+
+# --- User Inputs ---
+sequences:
+  - protein:
+      id: A # Chain ID
+      sequence: QLEDSEVEAVAKGLEEMYANGVTEDNFKNYVKNNFAQQEISSVEEELNVNISDSCVANKIKDEFFAMISISAIVKAAQKKAWKELAVTVLRFAKANGLKTNAIIVAGQLALWAVQCG # Replace with your protein sequence
+
+model_checkpoint_path: PATH_TO_YOUR_TRAINED_MODEL.ckpt # Specify path to your .ckpt file
+
+# --- Data Configuration ---
+data:
+  # Path to the NOESY data file for the protein sequence above.
+  # This file should be in the format: "residueFrom residueTo peakID distance atomFrom atomTo"
+  noesy_file: PATH_TO_YOUR_NOESY_DATA.txt # e.g., /path/to/data/protein_A_noesy.txt
+
+  # NOESY featurizer parameters (should match training)
+  noesy_num_bins: 64
+  noesy_min_dist: 0.0
+  noesy_max_dist: 5.0 # Ensure this is consistent with how NOESY data was generated/filtered
+
+  # For inference, typically only one sequence is processed at a time.
+  # These are placeholders and might be overridden by the prediction script's loader.
+  # The main purpose here is to provide noesy_num_bins etc. for Hydra interpolation.
+  datasets:
+    - _target_: boltz.data.module.training.DatasetConfig # Using DatasetConfig for schema compatibility
+      name: inference_set
+      # msa_dir is not used for NOESY pipeline but kept for schema compatibility if loader expects it.
+      # The model configuration below will ensure MSAs are not used.
+      msa_dir: null
+      target_dir: null # Not loading targets from disk for inference from sequence
+      # noesy_dir is typically not needed here if data.noesy_file is used directly by predict script.
+      # If predict script uses DataModule, then this might need to point to a dir containing the noesy_file.
+      # For simplicity, assuming predict.py handles single noesy_file directly.
+
+# --- Model Configuration ---
+# These settings configure the model to use the NOESY pipeline.
+# They should generally match the settings used during training the NOESY-specific model.
+# The example below assumes the prediction script loads a 'structure_module' (TrunkModule) configuration.
+# If your prediction script loads 'trunk_args' directly under 'model', adjust nesting accordingly.
+model:
+  # This would typically be model.trunk_args if loading a BoltzLitModule checkpoint directly
+  # and the predict script expects that structure.
+  # If predict.py instantiates TrunkModule directly, then structure_module might be the key.
+  # For this example, we assume a structure similar to structure.yaml's model section.
+  structure_module: # This key might need to be model.trunk_args depending on predict.py
+    _target_: boltz.model.modules.trunk.TrunkModule # Or appropriate TrunkModule if wrapped
+
+    input_embedder_args:
+      _target_: boltz.model.modules.trunk.InputEmbedder
+      # Common dimensions, should match the trained model
+      atom_s: 384  # Dimension of 'a' (atom-level context from InputEmbedder)
+      atom_z: 64   # Pair dimension for atomic pair features (if AtomAttentionEncoder is used)
+      token_s: 384 # Target single representation dim for AtomAttentionEncoder output to tokens
+      token_z: 64  # Target pair representation dim for AtomAttentionEncoder output to token pairs
+
+      # AtomAttentionEncoder specific (if no_atom_encoder: false, which is not typical for NOESY)
+      atoms_per_window_queries: 12
+      atoms_per_window_keys: 12
+      atom_feature_dim: 77         # Dimension of input atom features
+      atom_encoder_depth: 2
+      atom_encoder_heads: 4
+
+      # --- NOESY Pipeline Specific settings for InputEmbedder ---
+      use_noesy_pipeline: true # Ensures MSA-related features (profile, deletion_mean) are excluded from 's'
+      no_atom_encoder: true    # Typically true for NOESY pipeline, meaning 'a' will be zeros of dim 'atom_s'
+
+    msa_args: # Arguments for MSAModule (which handles NOESY data if use_noesy: true)
+      _target_: boltz.model.modules.trunk.MSAModule
+      # Common dimensions, should match the trained model
+      msa_s: 64 # Dimension of MSA representation (becomes token_s for InputEmbedder output if no_atom_encoder=false)
+                   # This is also used as input 's_input_dim' for MSAModule's s_proj if not use_noesy.
+                   # When use_noesy=true, s_proj is not used.
+      token_z: 64   # Pair representation dimension
+
+      # s_input_dim: Dimension of 's' from InputEmbedder.
+      # Calculation for use_noesy_pipeline=true and no_atom_encoder=true:
+      #   InputEmbedder.atom_s (for 'a') + const.num_tokens (for res_type) + len(const.pocket_contact_info) (for pocket_feature)
+      #   Example: 384 (from input_embedder_args.atom_s) + 26 + 4 = 414
+      s_input_dim: 414 # MUST BE CALCULATED AND SET CORRECTLY based on input_embedder_args and consts
+
+      # MSA specific (not used if use_noesy: true, but schema might require them)
+      msa_blocks: 4
+      msa_dropout: 0.0 # No dropout at inference
+      z_dropout: 0.0   # No dropout at inference
+      pairwise_head_width: 32
+      pairwise_num_heads: 4
+      activation_checkpointing: false # No checkpointing at inference
+      offload_to_cpu: false
+      use_paired_feature: false # Assuming not used with NOESY
+      use_trifast: true         # Or false, match training
+
+      # --- NOESY Pipeline Specific settings for MSAModule ---
+      use_noesy: true # Tells MSAModule to use its internal NOESYModule to generate 'z'
+      noesy_feature_dim: ${data.noesy_num_bins} # Input dim for NOESYModule (from data config)
+      noesy_hidden_dim: null # Optional hidden dim for NOESYModule's MLP (e.g., 128)
+
+    pairformer_args:
+      _target_: boltz.model.modules.trunk.PairformerModule
+      # Common dimensions, should match the trained model
+      token_s: 384
+      token_z: 64
+      num_blocks: 48
+      num_heads: 16
+      dropout: 0.0 # No dropout at inference
+      pairwise_head_width: 32
+      pairwise_num_heads: 4
+      activation_checkpointing: false # No checkpointing at inference
+      offload_to_cpu: false
+      use_trifast: true # Or false, match training
+
+    # DistogramModule (if model outputs distogram, match training)
+    # distogram_args:
+    #   _target_: boltz.model.modules.trunk.DistogramModule
+    #   token_z: ${model.structure_module.pairformer_args.token_z} # Example if it uses pairformer's token_z
+    #   num_bins: ${data.num_bins} # General distogram bins, not NOESY specific
+
+  # StructureBuilder (part of BoltzLitModule, might be configured differently for predict.py)
+  # If predict.py uses BoltzLitModule, these args would be under model.score_model_args or similar.
+  # For this example, assuming a simplified setup where Trunk output goes to a builder if needed.
+  # Placeholder for StructureBuilder/Diffusion related args - these are highly model specific.
+  # Ensure these match your trained model and inference needs.
+  # Example:
+  # score_model_args: # Or structure_builder_args, depending on your model wrapper
+  #   _target_: boltz.model.modules.diffusion.StructureBuilder # Or your specific score model
+  #   s_dim: ${model.structure_module.pairformer_args.token_s}
+  #   z_dim: ${model.structure_module.pairformer_args.token_z}
+  #   # ... other score model / diffusion parameters ...
+  #   diff_num_steps: 100 # Inference diffusion steps
+
+# --- Prediction Script Specific Settings ---
+# output_dir: "predictions/"
+# num_predictions: 1
+# device: "cuda:0"
+
+# --- Notes on s_input_dim for msa_args (when imitate_trunk=true in Confidence or for main Trunk) ---
+# It's the output dimension of InputEmbedder's 's' representation.
+# If InputEmbedder.use_noesy_pipeline = true AND InputEmbedder.no_atom_encoder = true:
+#   's' consists of:
+#     1. 'a' (zeros): dim = input_embedder_args.atom_s (e.g., 384)
+#     2. 'res_type': dim = boltz.data.const.num_tokens (typically 26 for amino acids)
+#     3. 'pocket_feature': dim = len(boltz.data.const.pocket_contact_info) (typically 4)
+#   So, s_input_dim = input_embedder_args.atom_s + const.num_tokens + len(const.pocket_contact_info)
+#   Example: 384 + 26 + 4 = 414. This value (414) must be set for msa_args.s_input_dim.
+#
+# If InputEmbedder.use_noesy_pipeline = false (standard MSA pipeline):
+#   's' consists of:
+#     1. 'a': dim = input_embedder_args.atom_s
+#     2. 'res_type': dim = const.num_tokens
+#     3. 'profile': dim = const.num_tokens
+#     4. 'deletion_mean': dim = 1
+#     5. 'pocket_feature': dim = len(const.pocket_contact_info)
+#   So, s_input_dim = input_embedder_args.atom_s + const.num_tokens + const.num_tokens + 1 + len(const.pocket_contact_info)
+#   Example: 384 + 26 + 26 + 1 + 4 = 441.
+```
