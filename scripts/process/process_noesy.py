@@ -279,21 +279,33 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
 
             for atom_idx_in_res, atom_npz_entry_original in enumerate(current_residue_atom_npz_entries):
                 atom_serial += 1
-                global_atom_idx = atom_start_global_idx + atom_idx_in_res
+                # global_atom_idx is atom_start_global_idx + atom_idx_in_res
+                # atom_npz_entry_original is npz_data['atoms'][global_atom_idx]
 
-                coord_entry_from_npz = npz_data['coords'][global_atom_idx]
-                # Expecting structure like ([x, y, z],) or ((x, y, z),) etc.
-                # Add safety check and correct unpacking
-                if (not coord_entry_from_npz or
-                    not hasattr(coord_entry_from_npz, '__getitem__') or
-                    len(coord_entry_from_npz) == 0 or
-                    not hasattr(coord_entry_from_npz[0], '__getitem__') or
-                    len(coord_entry_from_npz[0]) < 3):
-                    logger.error(f"Unexpected coordinate structure for global_atom_idx {global_atom_idx}: {coord_entry_from_npz}")
+                # --- New Coordinate Extraction from atom_npz_entry_original[3] ---
+                # Assuming atom_npz_entry_original is structured like:
+                # ( [metadata_list], atomic_number, 0, [x, y, z] ) based on user's NPZ spec.
+                # So, atom_npz_entry_original[3] should be the list [x, y, z].
+
+                if len(atom_npz_entry_original) < 4:
+                    logger.warning(
+                        f"Atom entry for global_atom_idx {atom_start_global_idx + atom_idx_in_res} in file {npz_data.get('id', 'UNKNOWN_FILE')} "
+                        f"has fewer than 4 elements, cannot extract coordinates. Entry: {atom_npz_entry_original}. Skipping ATOM record."
+                    )
+                    continue
+
+                coord_list_from_atom_entry = atom_npz_entry_original[3]
+
+                # Safety check for the coordinate list from the 'atoms' entry
+                if not hasattr(coord_list_from_atom_entry, '__getitem__') or len(coord_list_from_atom_entry) < 3:
+                    logger.warning(
+                        f"Atom entry for global_atom_idx {atom_start_global_idx + atom_idx_in_res} in file {npz_data.get('id', 'UNKNOWN_FILE')} "
+                        f"has unexpected coordinate structure in 'atoms' array entry[3]: {coord_list_from_atom_entry}. Skipping ATOM record."
+                    )
                     continue # Skip this atom
 
-                actual_coords = coord_entry_from_npz[0]
-                x, y, z = actual_coords[0], actual_coords[1], actual_coords[2]
+                x, y, z = coord_list_from_atom_entry[0], coord_list_from_atom_entry[1], coord_list_from_atom_entry[2]
+                # --- End of New Coordinate Extraction ---
 
                 # Use the heuristic naming function
                 # Pass the original atom_npz_entry (from global 'atoms' array)

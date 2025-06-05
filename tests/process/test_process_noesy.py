@@ -32,64 +32,53 @@ from Bio.PDB.vectors import Vector # Keep for get_atoms test
 # --- Helper for Mock NPZ data ---
 def get_mock_npz_data():
     """Returns a dictionary simulating loaded NPZ data."""
-    # Based on assumed structure:
-    # atoms: (total_atoms, features_per_atom); atom_entry[1] is atomic_number.
-    # coords: (total_atoms, 3)
-    # residues: (total_residues_in_protein, features_per_residue)
-    #   - res_entry[0]: 3-letter residue name (str)
-    #   - res_entry[2]: chain index (int, 0-based) in npz_data['chains']
-    #   - res_entry[3]: residue sequence number within its chain (int, 0-based)
-    #   - res_entry[4]: global start index for this residue's atoms
-    #   - res_entry[5]: number of atoms this residue has
-    # chains: (num_chains, features_per_chain)
-    #   - chain_entry[0]: chain ID (str, e.g., 'A')
+    # Based on user's NPZ spec:
+    # atoms entry: (type_info_tuple, atomic_number, placeholder_int, [x,y,z], other_vector_list, bool_flag, chain_idx_in_chains_array)
+
+    # Define coordinates that will be embedded in 'atoms' and also in global 'coords'
+    coords_gly_n   = [1.0, 2.0, 3.0]
+    coords_gly_ca  = [1.1, 2.1, 3.1]
+    coords_gly_c   = [1.2, 2.2, 3.2]
+    coords_gly_o   = [1.3, 2.3, 3.3]
+    coords_ala_n   = [2.0, 3.0, 4.0]
+    coords_ala_ca  = [2.1, 3.1, 4.1]
+    coords_ala_c   = [2.2, 3.2, 4.2]
+    coords_ala_o   = [2.3, 3.3, 4.3]
+    coords_ala_cb  = [2.4, 3.4, 4.4]
+
+    mock_atoms_data = [
+        # Res1: GLY (N, CA, C, O) - 4 atoms
+        # (type_info, atomic_num, placeholder_int, [x,y,z], other_vector, bool_flag, chain_idx)
+        ((46,0,0,0), 7, 0, coords_gly_n,  [0.0]*3, True, 0), # N
+        ((46,0,0,0), 6, 0, coords_gly_ca, [0.0]*3, True, 0), # CA
+        ((46,0,0,0), 6, 0, coords_gly_c,  [0.0]*3, True, 0), # C
+        ((46,0,0,0), 8, 0, coords_gly_o,  [0.0]*3, True, 0), # O
+        # Res2: ALA (N, CA, C, O, CB) - 5 atoms
+        ((46,0,0,0), 7, 0, coords_ala_n,  [0.0]*3, True, 0), # N
+        ((46,0,0,0), 6, 0, coords_ala_ca, [0.0]*3, True, 0), # CA
+        ((46,0,0,0), 6, 0, coords_ala_c,  [0.0]*3, True, 0), # C
+        ((46,0,0,0), 8, 0, coords_ala_o,  [0.0]*3, True, 0), # O
+        ((46,0,0,0), 6, 0, coords_ala_cb, [0.0]*3, True, 0)  # CB
+    ]
+
+    mock_global_coords_data = [
+        (coords_gly_n,), (coords_gly_ca,), (coords_gly_c,), (coords_gly_o,),
+        (coords_ala_n,), (coords_ala_ca,), (coords_ala_c,), (coords_ala_o,), (coords_ala_cb,)
+    ]
 
     mock_data = {
-        'atoms': np.array([
-            # Res1: GLY (N, CA, C, O)
-            ([0, 7, 0, 0], 7, 0), # N (atomic_num 7) - Atom 0
-            ([0, 6, 0, 0], 6, 0), # CA (atomic_num 6) - Atom 1
-            ([0, 6, 0, 0], 6, 0), # C  (atomic_num 6) - Atom 2
-            ([0, 8, 0, 0], 8, 0), # O  (atomic_num 8) - Atom 3
-            # Res2: ALA (N, CA, C, O, CB)
-            ([0, 7, 0, 0], 7, 0), # N  - Atom 4
-            ([0, 6, 0, 0], 6, 0), # CA - Atom 5
-            ([0, 6, 0, 0], 6, 0), # C  - Atom 6
-            ([0, 8, 0, 0], 8, 0), # O  - Atom 7
-            ([0, 6, 0, 0], 6, 0)  # CB - Atom 8
-        ], dtype=object), # Using dtype=object for the first element list/tuple
-        'coords': np.array([
-            ([1.0, 2.0, 3.0],),
-            ([1.1, 2.1, 3.1],),
-            ([1.2, 2.2, 3.2],),
-            ([1.3, 2.3, 3.3],), # GLY atoms
-            ([2.0, 3.0, 4.0],),
-            ([2.1, 3.1, 4.1],),
-            ([2.2, 3.2, 4.2],),
-            ([2.3, 3.3, 4.3],),
-            ([2.4, 3.4, 4.4],)  # ALA atoms
-        ], dtype=object), # dtype=object is crucial for nested tuples/lists
+        'atoms': np.array(mock_atoms_data, dtype=object),
+        'coords': np.array(mock_global_coords_data, dtype=object), # Kept for structural consistency with user NPZ
         'residues': np.array([
             # (resname, type_idx, chain_idx_in_chains, res_seq_in_chain_0idx, atom_start_idx, num_atoms_in_res)
-            ('GLY', 0, 0, 0, 0, 4),
-            ('ALA', 1, 0, 1, 4, 5)
+            ('GLY', 0, 0, 0, 0, 4), # 4 atoms for GLY
+            ('ALA', 1, 0, 1, 4, 5)  # 5 atoms for ALA, starting at global index 4
         ], dtype=object),
         'chains': np.array([
-            ('A',), ('B',) # Chain IDs
+            ('A',), # Chain ID for chain_idx_in_chains = 0
+            ('B',)  # Chain ID for chain_idx_in_chains = 1 (if used)
         ], dtype=object)
     }
-    # Correct the 'atoms' array structure: first element is a list/tuple, rest are numbers
-    # The example ([46,  0,  0,  0],  7, 0, ...) means atoms[i][0] is a list/tuple, atoms[i][1] is atomic_num
-    # For simplicity, let's make atoms[i][0] just a dummy int if its internal structure isn't used by map_atom_info.
-    # map_atom_info_to_pdb_atom_name uses atom_npz_entry[1] for atomic_number.
-    # So, the second element of each atom's tuple/list should be the atomic number.
-    # The current mock_data['atoms'] is fine, assuming atom_npz_entry[1] is used.
-    # Let's refine atoms to be a list of tuples, where first element can be anything (not used by map_atom)
-    # and second is atomic number.
-    mock_data['atoms'] = np.array([
-        (0, 7), (0, 6), (0, 6), (0, 8), # GLY (N, CA, C, O)
-        (0, 7), (0, 6), (0, 6), (0, 8), (0, 6)  # ALA (N, CA, C, O, CB)
-    ])
     return mock_data
 
 
