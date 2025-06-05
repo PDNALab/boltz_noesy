@@ -245,100 +245,117 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
     Writes a temporary PDB file from parsed NPZ data.
     Uses heuristic atom naming.
 
-    NPZ data structure assumptions (based on user description and typical formats):
-    - npz_data['atoms']: (total_atoms, features_per_atom); atom_entry[1] is atomic_number.
-    - npz_data['coords']: (total_atoms, 3)
-    - npz_data['residues']: (total_residues_in_protein, features_per_residue)
-        - res_entry[0]: 3-letter residue name (str)
-        - res_entry[2]: chain index (int, 0-based) in npz_data['chains']
-        - res_entry[3]: residue sequence number within its chain (int, 0-based for processing, converted to 1-based for PDB)
-        - res_entry[4]: global start index for this residue's atoms in 'atoms'/'coords' arrays
-        - res_entry[5]: number of atoms this residue has in 'atoms'/'coords' arrays
-    - npz_data['chains']: (num_chains, features_per_chain)
-        - chain_entry[0]: chain ID (str, e.g., 'A')
+    New NPZ data structure assumptions for 'chains':
+    - chain_entry[0]: chain ID (str, e.g., 'A')
+    - chain_entry[5]: start index of this chain's residues in the global 'residues_data' array.
+    - chain_entry[6]: number of residues in this chain.
+    Other arrays ('atoms', 'residues') are assumed as before.
     """
+    print(f"DEBUG: Entering write_temp_pdb_from_npz for temp file {temp_pdb_path}", flush=True)
+
+    atoms_data = npz_data['atoms']
+    residues_data = npz_data['residues']
+    chains_data = npz_data['chains']
+
     atom_serial = 0
-    with open(temp_pdb_path, 'w') as pdb_file:
-        for res_idx_in_protein, res_entry in enumerate(npz_data['residues']):
-            res_name = str(res_entry[0]) # Ensure it's string, e.g. 'VAL'
-            chain_npz_idx = int(res_entry[2])
-            # PDB residue numbers are 1-indexed. Assuming res_entry[3] is 0-indexed seq num in chain.
-            res_seq_num_pdb = int(res_entry[3]) + 1
+    atoms_written_count = 0
 
-            atom_start_global_idx = int(res_entry[4])
-            num_atoms_in_this_res_npz = int(res_entry[5])
+    with open(temp_pdb_path, 'w', encoding='utf-8') as f:
+        # Iterate through chains as defined in chains_data
+        for chain_idx_in_npz, chain_entry in enumerate(chains_data):
+            if len(chain_entry) < 7:
+                logger.warning(f"Chain entry {chain_idx_in_npz} has too few fields: {chain_entry}. Skipping chain.")
+                continue
 
-            chain_id_str = str(npz_data['chains'][chain_npz_idx][0]) if chain_npz_idx < len(npz_data['chains']) else 'A'
-            if not chain_id_str.strip() or len(chain_id_str) > 1: # Default or handle multi-char chain IDs if necessary
-                chain_id_pdb = 'A'
-            else:
-                chain_id_pdb = chain_id_str.strip()
+            chain_pdb_id_raw = str(chain_entry[0])
+            chain_pdb_id = chain_pdb_id_raw.strip() if chain_pdb_id_raw.strip() else 'A' # Default if empty after strip
+            if len(chain_pdb_id) > 1: chain_pdb_id = chain_pdb_id[0] # Take first char if multi-char
 
-            # Get all atom entries for the current residue to help with naming
-            current_residue_atom_npz_entries = [
-                npz_data['atoms'][atom_start_global_idx + i] for i in range(num_atoms_in_this_res_npz)
-            ]
+            res_start_idx_in_residues_array = int(chain_entry[5])
+            num_residues_in_chain = int(chain_entry[6])
+            print(f"DEBUG: Processing Chain ID: {chain_pdb_id}, NPZ chain_idx: {chain_idx_in_npz}, num_residues: {num_residues_in_chain}, res_start_idx: {res_start_idx_in_residues_array}", flush=True)
 
-            for atom_idx_in_res, atom_npz_entry_original in enumerate(current_residue_atom_npz_entries):
-                atom_serial += 1
-                # global_atom_idx is atom_start_global_idx + atom_idx_in_res
-                # atom_npz_entry_original is npz_data['atoms'][global_atom_idx]
+            # Iterate through residues in this chain
+            for res_offset_in_chain in range(num_residues_in_chain):
+                res_idx_global_in_residues_array = res_start_idx_in_residues_array + res_offset_in_chain
 
-                # --- New Coordinate Extraction from atom_npz_entry_original[3] ---
-                # Assuming atom_npz_entry_original is structured like:
-                # ( [metadata_list], atomic_number, 0, [x, y, z] ) based on user's NPZ spec.
-                # So, atom_npz_entry_original[3] should be the list [x, y, z].
-
-                if len(atom_npz_entry_original) < 4:
-                    logger.warning(
-                        f"Atom entry for global_atom_idx {atom_start_global_idx + atom_idx_in_res} in file {npz_data.get('id', 'UNKNOWN_FILE')} "
-                        f"has fewer than 4 elements, cannot extract coordinates. Entry: {atom_npz_entry_original}. Skipping ATOM record."
-                    )
+                if res_idx_global_in_residues_array >= len(residues_data):
+                    logger.warning(f"Residue index {res_idx_global_in_residues_array} out of bounds for residues_data (len {len(residues_data)}). Skipping residue for chain {chain_pdb_id}.")
                     continue
 
-                coord_list_from_atom_entry = atom_npz_entry_original[3]
+                res_entry_original = residues_data[res_idx_global_in_residues_array]
 
-                # Safety check for the coordinate list from the 'atoms' entry
-                if not hasattr(coord_list_from_atom_entry, '__getitem__') or len(coord_list_from_atom_entry) < 3:
-                    logger.warning(
-                        f"Atom entry for global_atom_idx {atom_start_global_idx + atom_idx_in_res} in file {npz_data.get('id', 'UNKNOWN_FILE')} "
-                        f"has unexpected coordinate structure in 'atoms' array entry[3]: {coord_list_from_atom_entry}. Skipping ATOM record."
+                # Assuming res_entry_original structure:
+                # [0]: res_name, [3]: res_seq_num_in_chain_0idx, [4]: atom_start_global_idx, [5]: num_atoms_in_res_npz
+                if len(res_entry_original) < 6:
+                     logger.warning(f"Residue entry {res_idx_global_in_residues_array} has too few fields: {res_entry_original}. Skipping residue for chain {chain_pdb_id}.")
+                     continue
+
+                res_name = str(res_entry_original[0])
+                res_seq_num_for_pdb = int(res_entry_original[3]) + 1
+                atom_start_global_idx = int(res_entry_original[4])
+                num_atoms_in_res_npz = int(res_entry_original[5])
+
+                print(f"DEBUG:   Residue: {res_name}{res_seq_num_for_pdb} (Chain {chain_pdb_id}), NPZ res_glbl_idx: {res_idx_global_in_residues_array}, atom_start: {atom_start_global_idx}, num_atoms: {num_atoms_in_res_npz}", flush=True)
+
+                all_atom_entries_for_this_residue_npz = atoms_data[atom_start_global_idx : atom_start_global_idx + num_atoms_in_res_npz]
+
+                # Iterate through atoms in this residue
+                for atom_offset_in_residue in range(num_atoms_in_res_npz):
+                    global_atom_idx_for_atoms_array = atom_start_global_idx + atom_offset_in_residue
+
+                    if global_atom_idx_for_atoms_array >= len(atoms_data):
+                        logger.warning(f"Global atom index {global_atom_idx_for_atoms_array} out of bounds for atoms_data (len {len(atoms_data)}). Skipping atom for residue {res_name}{res_seq_num_for_pdb}.")
+                        continue
+
+                    atom_npz_entry_original = atoms_data[global_atom_idx_for_atoms_array]
+                    print(f"DEBUG:     Atom global_idx: {global_atom_idx_for_atoms_array}, NPZ atom_entry: {atom_npz_entry_original!r}", flush=True)
+
+                    if len(atom_npz_entry_original) < 4:
+                        logger.warning(f"Atom {global_atom_idx_for_atoms_array} in file {npz_data.get('id', 'UNKNOWN_FILE')} has insufficient fields in 'atoms' array entry: {atom_npz_entry_original!r}. Skipping ATOM.")
+                        continue
+
+                    coord_list_from_atom_entry = atom_npz_entry_original[3]
+                    if not hasattr(coord_list_from_atom_entry, '__getitem__') or not hasattr(coord_list_from_atom_entry, '__len__') or len(coord_list_from_atom_entry) < 3:
+                        logger.warning(
+                            f"Atom {global_atom_idx_for_atoms_array} in file {npz_data.get('id', 'UNKNOWN_FILE')} "
+                            f"has unexpected coordinate structure in 'atoms' array entry[3]: {coord_list_from_atom_entry!r}. Skipping ATOM."
+                        )
+                        continue
+
+                    x, y, z = coord_list_from_atom_entry[0], coord_list_from_atom_entry[1], coord_list_from_atom_entry[2]
+
+                    atom_name_pdb = map_atom_info_to_pdb_atom_name(
+                        atom_npz_entry_original,
+                        res_name,
+                        atom_offset_in_residue,
+                        all_atom_entries_for_this_residue_npz
                     )
-                    continue # Skip this atom
 
-                x, y, z = coord_list_from_atom_entry[0], coord_list_from_atom_entry[1], coord_list_from_atom_entry[2]
-                # --- End of New Coordinate Extraction ---
+                    # Ensure atomic_number is accessible and valid
+                    if len(atom_npz_entry_original) < 2 : # Should have been caught by len < 4 if coords are at [3]
+                         logger.warning(f"Atom entry {global_atom_idx_for_atoms_array} missing atomic number field. Skipping.")
+                         continue
+                    atomic_number = atom_npz_entry_original[1]
+                    element_symbol = ATOMIC_NUMBER_TO_SYMBOL.get(atomic_number, 'X').rjust(2) # Right justify for PDB
 
-                # Use the heuristic naming function
-                # Pass the original atom_npz_entry (from global 'atoms' array)
-                atom_pdb_name = map_atom_info_to_pdb_atom_name(
-                    atom_npz_entry_original,
-                    res_name,
-                    atom_idx_in_res, # 0-indexed position of this atom within this residue's list from NPZ
-                    current_residue_atom_npz_entries
-                )
+                    atom_serial += 1
 
-                atomic_number = atom_npz_entry_original[1]
-                element_symbol = ATOMIC_NUMBER_TO_SYMBOL.get(atomic_number, "X").upper()
-                # PDB format: element symbol is right-justified in columns 77-78
-                element_symbol_pdb = f"{element_symbol:>2}"
+                    # Using res_name[:3] to ensure it's max 3 chars for PDB
+                    pdb_line = (
+                        f"ATOM  {atom_serial:5d} {atom_name_pdb:<4s}{res_name[:3]:<3s} {chain_pdb_id:1s}{res_seq_num_for_pdb:4d}    "
+                        f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          {element_symbol:<2s}\n" # Note: \n added
+                    )
+                    f.write(pdb_line)
+                    atoms_written_count += 1
+                    if atoms_written_count % 500 == 0:
+                        print(f"DEBUG:       ... {atoms_written_count} atoms written to PDB ...", flush=True)
+                        logger.info(f"DEBUG: ... {atoms_written_count} atoms written to PDB for {npz_data.get('id', 'UNKNOWN_FILE')} ...")
 
-                # ATOM record format string (fixed width)
-                # Record name, Atom serial, Atom name, Alt loc, Res name, Chain ID, Res seq num, Insertion, X, Y, Z, Occupancy, Temp factor, Element, Charge
-                # "ATOM  %5d %-4s %3s %1s%4d    %8.3f%8.3f%8.3f%6.2f%6.2f          %2s  "
-                # Atom name: %-4s (left justified) or %4s. PDB standard is complex.
-                # For atom name like " CA ", use atom_pdb_name directly if it's already 4 chars.
-                # If atom_pdb_name is "CA", it should be " CA ".
-                # The map_atom_info_to_pdb_atom_name should return a 4-char string.
-
-                pdb_line = (
-                    f"ATOM  {atom_serial:5d} {atom_pdb_name:4s} {res_name:3s} {chain_id_pdb:1s}{res_seq_num_pdb:4d}    "
-                    f"{x:8.3f}{y:8.3f}{z:8.3f}{1.00:6.2f}{0.00:6.2f}          "
-                    f"{element_symbol_pdb:2s}  \n"
-                )
-                pdb_file.write(pdb_line)
-    if atom_serial == 0:
-        logger.warning(f"No atoms were written to temporary PDB file: {temp_pdb_path}. NPZ parsing might have issues.")
+        f.write("END\n") # Add newline to END record
+    print(f"DEBUG: Exiting write_temp_pdb_from_npz for temp file {temp_pdb_path}, total atoms written: {atoms_written_count}", flush=True)
+    if atoms_written_count == 0 and atom_serial == 0 : # atom_serial would only be 0 if no residues processed at all
+        logger.warning(f"No atoms were written to temporary PDB file: {temp_pdb_path}. NPZ parsing or chain/residue iteration might have issues.")
 
 # --- End of New NPZ Processing Functions ---
 
