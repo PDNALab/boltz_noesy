@@ -59,9 +59,16 @@ def get_mock_npz_data():
             ([0, 6, 0, 0], 6, 0)  # CB - Atom 8
         ], dtype=object), # Using dtype=object for the first element list/tuple
         'coords': np.array([
-            [1.0, 2.0, 3.0], [1.1, 2.1, 3.1], [1.2, 2.2, 3.2], [1.3, 2.3, 3.3], # GLY
-            [2.0, 3.0, 4.0], [2.1, 3.1, 4.1], [2.2, 3.2, 4.2], [2.3, 3.3, 4.3], [2.4, 3.4, 4.4]  # ALA
-        ]),
+            ([1.0, 2.0, 3.0],),
+            ([1.1, 2.1, 3.1],),
+            ([1.2, 2.2, 3.2],),
+            ([1.3, 2.3, 3.3],), # GLY atoms
+            ([2.0, 3.0, 4.0],),
+            ([2.1, 3.1, 4.1],),
+            ([2.2, 3.2, 4.2],),
+            ([2.3, 3.3, 4.3],),
+            ([2.4, 3.4, 4.4],)  # ALA atoms
+        ], dtype=object), # dtype=object is crucial for nested tuples/lists
         'residues': np.array([
             # (resname, type_idx, chain_idx_in_chains, res_seq_in_chain_0idx, atom_start_idx, num_atoms_in_res)
             ('GLY', 0, 0, 0, 0, 4),
