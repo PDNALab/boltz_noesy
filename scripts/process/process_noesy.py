@@ -309,7 +309,7 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
                         continue
 
                     atom_npz_entry_original = atoms_data[global_atom_idx_for_atoms_array]
-                    print(f"DEBUG:     Atom global_idx: {global_atom_idx_for_atoms_array}, NPZ atom_entry: {atom_npz_entry_original!r}", flush=True)
+                    # print(f"DEBUG:     Atom global_idx: {global_atom_idx_for_atoms_array}, NPZ atom_entry: {atom_npz_entry_original!r}", flush=True) # Commented out as per request
 
                     if len(atom_npz_entry_original) < 4:
                         logger.warning(f"Atom {global_atom_idx_for_atoms_array} in file {npz_data.get('id', 'UNKNOWN_FILE')} has insufficient fields in 'atoms' array entry: {atom_npz_entry_original!r}. Skipping ATOM.")
