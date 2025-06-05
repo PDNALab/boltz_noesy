@@ -276,6 +276,7 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
             print(f"DEBUG: Processing Chain ID: {chain_pdb_id}, NPZ chain_idx: {chain_idx_in_npz}, num_residues: {num_residues_in_chain}, res_start_idx: {res_start_idx_in_residues_array}", flush=True)
 
             # Iterate through residues in this chain
+            print(f"DEBUG: Chain {chain_pdb_id} - num_residues_in_chain: {num_residues_in_chain}", flush=True)
             for res_offset_in_chain in range(num_residues_in_chain):
                 res_idx_global_in_residues_array = res_start_idx_in_residues_array + res_offset_in_chain
 
@@ -301,6 +302,7 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
                 all_atom_entries_for_this_residue_npz = atoms_data[atom_start_global_idx : atom_start_global_idx + num_atoms_in_res_npz]
 
                 # Iterate through atoms in this residue
+                print(f"DEBUG:   Residue {res_name}{res_seq_num_for_pdb} (Chain {chain_pdb_id}) - num_atoms_in_res_npz: {num_atoms_in_res_npz}", flush=True)
                 for atom_offset_in_residue in range(num_atoms_in_res_npz):
                     global_atom_idx_for_atoms_array = atom_start_global_idx + atom_offset_in_residue
 
