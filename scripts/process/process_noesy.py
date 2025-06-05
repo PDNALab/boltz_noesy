@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import logging # For better error messages
 import traceback # For detailed error logging
+from pathlib import Path # Ensure Path is imported
 # import shutil # Not currently used but often useful with temp files
 
 from Bio.PDB import PDBParser # MMCIFParser might not be needed if input is PDB from NPZ
@@ -62,6 +63,7 @@ def add_hydrogens(pdb_file: str, output_pdb_file: str) -> bool:
     Shells out to the pdb2pqr30 command-line tool.
     Returns True on success, False on failure.
     """
+    print(f"DEBUG: Entering add_hydrogens function for input: {pdb_file}, output: {output_pdb_file}", flush=True)
     command = [
         PDB2PQR_PATH,
         "--ff=AMBER",      # Force field
@@ -509,46 +511,52 @@ def main():
         logger.warning(f"No .npz files found in {args.input_dir}")
         return
 
-    for npz_filename in npz_files:
+    for npz_filename in npz_files: # Using npz_files directly if tqdm is not needed for now
         npz_file_path = os.path.join(args.input_dir, npz_filename)
-        base_name_npz = os.path.basename(npz_file_path)
-        name_part_npz, _ = os.path.splitext(base_name_npz)
+        # base_name_npz = os.path.basename(npz_file_path) # Already got this
+        name_part_npz, _ = os.path.splitext(npz_filename) # Use npz_filename for name_part
 
         logger.info(f"\nProcessing {npz_file_path}...")
+        print(f"DEBUG: Top of loop for {npz_file_path}", flush=True)
 
-        temp_initial_pdb_file = None
-        temp_hydro_pdb_file = None
+        # Initialize names for finally block, and a list to gather files for removal
+        temp_initial_pdb_name = None
+        temp_hydro_pdb_name = None
+        temp_files_to_remove = []
 
         try:
-            # 1. Parse NPZ
+            print(f"DEBUG: Calling parse_npz for {npz_file_path}", flush=True)
             npz_data = parse_npz(npz_file_path)
+            npz_data['id'] = Path(npz_file_path).stem # Add file ID for logging context
+            print(f"DEBUG: Finished parse_npz for {npz_file_path}", flush=True)
 
-            # 2. Create a temporary PDB file from NPZ data
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".pdb", delete=False) as tmp_pdb_initial:
-                temp_initial_pdb_file = tmp_pdb_initial.name
+            # Create temporary files using with statement for ensured creation before naming
+            # delete=False means we are responsible for cleanup, done in finally block
+            with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='_initial.pdb', encoding='utf-8') as temp_initial_pdb_file_obj, \
+                 tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='_hydro.pdb', encoding='utf-8') as temp_hydro_pdb_file_obj:
+                temp_initial_pdb_name = temp_initial_pdb_file_obj.name
+                temp_hydro_pdb_name = temp_hydro_pdb_file_obj.name
 
-            write_temp_pdb_from_npz(npz_data, temp_initial_pdb_file)
-            logger.info(f"Generated initial PDB: {temp_initial_pdb_file}")
+            temp_files_to_remove.extend([temp_initial_pdb_name, temp_hydro_pdb_name])
+            print(f"DEBUG: Temp files created: {temp_initial_pdb_name}, {temp_hydro_pdb_name}", flush=True)
 
-            if not os.path.exists(temp_initial_pdb_file) or os.path.getsize(temp_initial_pdb_file) == 0:
-                logger.error(f"Initial PDB generation failed or produced an empty file for {npz_filename}, skipping.")
-                continue
+            print(f"DEBUG: Calling write_temp_pdb_from_npz for {npz_file_path}", flush=True)
+            write_temp_pdb_from_npz(npz_data, temp_initial_pdb_name)
+            print(f"DEBUG: Finished write_temp_pdb_from_npz for {npz_file_path}", flush=True)
 
-            # 3. Add hydrogens using PDB2PQR to the initial PDB
-            with tempfile.NamedTemporaryFile(mode="w+", suffix=".pdb", delete=False) as tmp_pdb_h:
-                 temp_hydro_pdb_file = tmp_pdb_h.name
+            if not os.path.exists(temp_initial_pdb_name) or os.path.getsize(temp_initial_pdb_name) == 0:
+                logger.error(f"Initial PDB file {temp_initial_pdb_name} was not created or is empty after write_temp_pdb_from_npz. Skipping {npz_filename}.")
+                continue # Goes to finally
 
-            hydro_added_successfully = add_hydrogens(temp_initial_pdb_file, temp_hydro_pdb_file)
+            print(f"DEBUG: Calling add_hydrogens for {temp_initial_pdb_name}", flush=True)
+            hydro_added_successfully = add_hydrogens(temp_initial_pdb_name, temp_hydro_pdb_name)
+            print(f"DEBUG: Finished add_hydrogens for {temp_initial_pdb_name}, success: {hydro_added_successfully}", flush=True)
 
             if not hydro_added_successfully:
                 logger.error(f"Skipping NOESY generation for {npz_file_path} due to hydrogen addition failure.")
-                # The finally block will handle cleanup of temp_initial_pdb_file.
-                # temp_hydro_pdb_file might not exist or be empty but cleanup will be attempted.
-                continue
+                continue # Goes to finally
 
-            # If add_hydrogens was successful, temp_hydro_pdb_file should exist and be non-empty.
-            # No need for explicit check here again if add_hydrogens guarantees it on True return.
-            logger.info(f"Successfully added hydrogens: {temp_hydro_pdb_file}")
+            logger.info(f"Successfully added hydrogens: {temp_hydro_pdb_name}")
 
             # 4. Generate NOESY data from the hydrogenated PDB
             noesy_data = generate_noesy_data(temp_hydro_pdb_file, args.distance_cutoff)
@@ -565,13 +573,14 @@ def main():
         except Exception as e:
             logger.error(f"Error processing file {npz_file_path}: {e}", exc_info=True)
         finally:
-            # Clean up temporary files
-            if temp_initial_pdb_file and os.path.exists(temp_initial_pdb_file):
-                os.remove(temp_initial_pdb_file)
-                logger.debug(f"Removed temp initial PDB: {temp_initial_pdb_file}")
-            if temp_hydro_pdb_file and os.path.exists(temp_hydro_pdb_file):
-                os.remove(temp_hydro_pdb_file)
-                logger.debug(f"Removed temp hydrogenated PDB: {temp_hydro_pdb_file}")
+            # Clean up temporary files explicitly added to the list
+            for temp_file_path_to_remove in temp_files_to_remove:
+                if temp_file_path_to_remove and os.path.exists(temp_file_path_to_remove):
+                    try:
+                        os.remove(temp_file_path_to_remove)
+                        logger.debug(f"Removed temp file: {temp_file_path_to_remove}")
+                    except OSError as e:
+                        logger.error(f"Error removing temp file {temp_file_path_to_remove}: {e}")
 
     logger.info("\nProcessing complete.")
 
