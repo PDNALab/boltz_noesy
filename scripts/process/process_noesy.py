@@ -296,7 +296,7 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
                 atom_start_global_idx = int(res_entry_original[4])
                 num_atoms_in_res_npz = int(res_entry_original[5])
 
-                print(f"DEBUG:   Residue: {res_name}{res_seq_num_for_pdb} (Chain {chain_pdb_id}), NPZ res_glbl_idx: {res_idx_global_in_residues_array}, atom_start: {atom_start_global_idx}, num_atoms: {num_atoms_in_res_npz}", flush=True)
+                # print(f"DEBUG:   Residue: {res_name}{res_seq_num_for_pdb} (Chain {chain_pdb_id}), NPZ res_glbl_idx: {res_idx_global_in_residues_array}, atom_start: {atom_start_global_idx}, num_atoms: {num_atoms_in_res_npz}", flush=True) # Commented out as per request
 
                 all_atom_entries_for_this_residue_npz = atoms_data[atom_start_global_idx : atom_start_global_idx + num_atoms_in_res_npz]
 
