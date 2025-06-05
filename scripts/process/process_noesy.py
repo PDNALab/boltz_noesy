@@ -286,16 +286,21 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
 
                 res_entry_original = residues_data[res_idx_global_in_residues_array]
 
-                # Assuming res_entry_original structure:
-                # [0]: res_name, [3]: res_seq_num_in_chain_0idx, [4]: atom_start_global_idx, [5]: num_atoms_in_res_npz
-                if len(res_entry_original) < 6:
-                     logger.warning(f"Residue entry {res_idx_global_in_residues_array} has too few fields: {res_entry_original}. Skipping residue for chain {chain_pdb_id}.")
+                # New interpretation based on request:
+                # New interpretation based on request:
+                # [0]: res_name
+                # [2]: res_seq_num_in_chain_0idx (for PDB numbering)
+                # [3]: atom_start_global_idx
+                # [4]: num_atoms_in_res_npz
+                if len(res_entry_original) < 5: # Need at least up to index 4 for these fields
+                     logger.warning(f"Residue entry {res_idx_global_in_residues_array} has too few fields for current indexing: {res_entry_original}. Skipping residue for chain {chain_pdb_id}.")
                      continue
 
                 res_name = str(res_entry_original[0])
-                res_seq_num_for_pdb = int(res_entry_original[3]) + 1
-                atom_start_global_idx = int(res_entry_original[4])
-                num_atoms_in_res_npz = int(res_entry_original[5])
+                res_seq_num_for_pdb = int(res_entry_original[2]) + 1 # New source for PDB residue number
+
+                atom_start_global_idx = int(res_entry_original[3])
+                num_atoms_in_res_npz = int(res_entry_original[4])
 
                 # print(f"DEBUG:   Residue: {res_name}{res_seq_num_for_pdb} (Chain {chain_pdb_id}), NPZ res_glbl_idx: {res_idx_global_in_residues_array}, atom_start: {atom_start_global_idx}, num_atoms: {num_atoms_in_res_npz}", flush=True) # Commented out as per request
 
