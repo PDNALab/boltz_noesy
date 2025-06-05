@@ -7,6 +7,9 @@ import argparse
 
 # Make sure scripts directory is in path for import, or adjust import path
 # This assumes that the tests are run from a context where 'scripts' is discoverable.
+import io # For mocking file content for PDB writing
+import numpy as np # For NPZ data
+
 # For robustness, one might adjust sys.path or use relative imports if the test runner setup allows.
 # For now, direct import if PYTHONPATH is set up (e.g. by running from repo root)
 from scripts.process.process_noesy import (
@@ -14,13 +17,74 @@ from scripts.process.process_noesy import (
     get_atoms,
     generate_noesy_data,
     main as process_noesy_main,
-    RELEVANT_ATOMS, # For validating atom selection
+    parse_npz, # New function to test
+    map_atom_info_to_pdb_atom_name, # New function to test
+    write_temp_pdb_from_npz, # New function to test
+    RELEVANT_ATOMS,
     BACKBONE_AMIDE,
-    PDB2PQR_PATH
+    PDB2PQR_PATH,
+    ATOMIC_NUMBER_TO_SYMBOL # Import for testing map_atom_info
 )
 
-from Bio.PDB import PDBParser, Structure, Model, Chain, Residue, Atom
-from Bio.PDB.vectors import Vector
+from Bio.PDB import PDBParser, Structure, Model, Chain, Residue, Atom # Keep for get_atoms test
+from Bio.PDB.vectors import Vector # Keep for get_atoms test
+
+# --- Helper for Mock NPZ data ---
+def get_mock_npz_data():
+    """Returns a dictionary simulating loaded NPZ data."""
+    # Based on assumed structure:
+    # atoms: (total_atoms, features_per_atom); atom_entry[1] is atomic_number.
+    # coords: (total_atoms, 3)
+    # residues: (total_residues_in_protein, features_per_residue)
+    #   - res_entry[0]: 3-letter residue name (str)
+    #   - res_entry[2]: chain index (int, 0-based) in npz_data['chains']
+    #   - res_entry[3]: residue sequence number within its chain (int, 0-based)
+    #   - res_entry[4]: global start index for this residue's atoms
+    #   - res_entry[5]: number of atoms this residue has
+    # chains: (num_chains, features_per_chain)
+    #   - chain_entry[0]: chain ID (str, e.g., 'A')
+
+    mock_data = {
+        'atoms': np.array([
+            # Res1: GLY (N, CA, C, O)
+            ([0, 7, 0, 0], 7, 0), # N (atomic_num 7) - Atom 0
+            ([0, 6, 0, 0], 6, 0), # CA (atomic_num 6) - Atom 1
+            ([0, 6, 0, 0], 6, 0), # C  (atomic_num 6) - Atom 2
+            ([0, 8, 0, 0], 8, 0), # O  (atomic_num 8) - Atom 3
+            # Res2: ALA (N, CA, C, O, CB)
+            ([0, 7, 0, 0], 7, 0), # N  - Atom 4
+            ([0, 6, 0, 0], 6, 0), # CA - Atom 5
+            ([0, 6, 0, 0], 6, 0), # C  - Atom 6
+            ([0, 8, 0, 0], 8, 0), # O  - Atom 7
+            ([0, 6, 0, 0], 6, 0)  # CB - Atom 8
+        ], dtype=object), # Using dtype=object for the first element list/tuple
+        'coords': np.array([
+            [1.0, 2.0, 3.0], [1.1, 2.1, 3.1], [1.2, 2.2, 3.2], [1.3, 2.3, 3.3], # GLY
+            [2.0, 3.0, 4.0], [2.1, 3.1, 4.1], [2.2, 3.2, 4.2], [2.3, 3.3, 4.3], [2.4, 3.4, 4.4]  # ALA
+        ]),
+        'residues': np.array([
+            # (resname, type_idx, chain_idx_in_chains, res_seq_in_chain_0idx, atom_start_idx, num_atoms_in_res)
+            ('GLY', 0, 0, 0, 0, 4),
+            ('ALA', 1, 0, 1, 4, 5)
+        ], dtype=object),
+        'chains': np.array([
+            ('A',), ('B',) # Chain IDs
+        ], dtype=object)
+    }
+    # Correct the 'atoms' array structure: first element is a list/tuple, rest are numbers
+    # The example ([46,  0,  0,  0],  7, 0, ...) means atoms[i][0] is a list/tuple, atoms[i][1] is atomic_num
+    # For simplicity, let's make atoms[i][0] just a dummy int if its internal structure isn't used by map_atom_info.
+    # map_atom_info_to_pdb_atom_name uses atom_npz_entry[1] for atomic_number.
+    # So, the second element of each atom's tuple/list should be the atomic number.
+    # The current mock_data['atoms'] is fine, assuming atom_npz_entry[1] is used.
+    # Let's refine atoms to be a list of tuples, where first element can be anything (not used by map_atom)
+    # and second is atomic number.
+    mock_data['atoms'] = np.array([
+        (0, 7), (0, 6), (0, 6), (0, 8), # GLY (N, CA, C, O)
+        (0, 7), (0, 6), (0, 6), (0, 8), (0, 6)  # ALA (N, CA, C, O, CB)
+    ])
+    return mock_data
+
 
 # Helper to create a dummy Atom object
 def create_dummy_atom(name, element='H', coord=(0,0,0)):
@@ -47,9 +111,112 @@ def create_dummy_structure(residues_list):
 
 class TestProcessNoesy(unittest.TestCase):
 
+class TestProcessNoesy(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_npz_data = get_mock_npz_data()
+
+    # --- Tests for new NPZ functions ---
+    @patch('numpy.load')
+    def test_parse_npz_success(self, mock_np_load):
+        mock_np_load.return_value = self.mock_npz_data
+
+        data = parse_npz("dummy.npz")
+
+        mock_np_load.assert_called_once_with("dummy.npz")
+        self.assertIn('atoms', data)
+        self.assertIn('coords', data)
+        self.assertIn('residues', data)
+        self.assertIn('chains', data)
+        np.testing.assert_array_equal(data['atoms'], self.mock_npz_data['atoms'])
+
+    @patch('numpy.load')
+    def test_parse_npz_file_not_found(self, mock_np_load):
+        mock_np_load.side_effect = FileNotFoundError
+        with self.assertRaises(FileNotFoundError):
+            parse_npz("non_existent.npz")
+
+    @patch('numpy.load')
+    def test_parse_npz_key_error(self, mock_np_load):
+        mock_np_load.return_value = {'coords': self.mock_npz_data['coords']} # Missing 'atoms'
+        with self.assertRaises(KeyError): # Or whatever error parse_npz raises for missing keys
+            parse_npz("dummy.npz")
+
+
+    def test_map_atom_info_to_pdb_atom_name(self):
+        # Test cases: (atom_npz_entry_tuple, res_name, atom_idx_in_res_npz, all_atom_entries_tuples) -> expected_name
+        # all_atom_entries_for_this_residue is a list of tuples like (dummy_features, atomic_number)
+
+        # GLY atoms (N, CA, C, O)
+        gly_atoms_npz = [(0,7), (0,6), (0,6), (0,8)] # N, CA, C, O
+        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array(gly_atoms_npz[0]), "GLY", 0, gly_atoms_npz), " N  ")
+        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array(gly_atoms_npz[1]), "GLY", 1, gly_atoms_npz), " CA ")
+        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array(gly_atoms_npz[2]), "GLY", 2, gly_atoms_npz), " C  ")
+        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array(gly_atoms_npz[3]), "GLY", 3, gly_atoms_npz), " O  ")
+
+        # ALA atoms (N, CA, C, O, CB)
+        ala_atoms_npz = [(0,7), (0,6), (0,6), (0,8), (0,6)] # N, CA, C, O, CB
+        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array(ala_atoms_npz[0]), "ALA", 0, ala_atoms_npz), " N  ")
+        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array(ala_atoms_npz[4]), "ALA", 4, ala_atoms_npz), " CB ")
+
+        # Test fallback naming for a generic heavy atom beyond CB
+        # Example: ARG with CD (atomic_num 6), assume it's the 5th heavy atom (index 4 if N,CA,C,O,CB were before)
+        # Let's say it's the 6th heavy atom in the list (index 5 for heavy_atom_counter)
+        # For this, we need to count heavy atoms in all_atom_entries_for_this_residue
+        arg_atoms_npz = [(0,7)]*5 + [(0,6)] # 5 dummy heavy atoms, then a Carbon
+        # atom_idx_in_residue_npz = 5, heavy_atom_counter_for_this_atom = 5
+        # element_type_count for Carbon at this position would be 1
+        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array(arg_atoms_npz[5]), "ARG", 5, arg_atoms_npz), " C1 ")
+
+        # Test hydrogen naming (generic H + index)
+        h_atom_npz = (0,1) # Hydrogen
+        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array(h_atom_npz), "ALA", 5, ala_atoms_npz + [h_atom_npz]), "H 6 ")
+
+
+    def test_write_temp_pdb_from_npz(self):
+        mock_data = get_mock_npz_data() # 2 residues, GLY (4 atoms), ALA (5 atoms)
+
+        # Use io.StringIO to capture PDB output
+        pdb_output_io = io.StringIO()
+
+        with patch('builtins.open', return_value=pdb_output_io, create=True):
+            write_temp_pdb_from_npz(mock_data, "dummy_path.pdb")
+
+        pdb_content = pdb_output_io.getvalue().splitlines()
+
+        self.assertEqual(len(pdb_content), 9) # 4 atoms for GLY + 5 for ALA
+
+        # Check first atom (GLY, N)
+        # ATOM      1  N   GLY A   1      1.000   2.000   3.000  1.00  0.00           N
+        # Our map_atom_info_to_pdb_atom_name gives " N  "
+        # Our res_seq_num_pdb is 0-idx from npz + 1. GLY is res_entry[3]=0 -> PDB res_num 1
+        # Chain ID 'A' from mock_data['chains'][0][0]
+        self.assertTrue(pdb_content[0].startswith("ATOM "))
+        self.assertEqual(pdb_content[0][7:11].strip(), "1")    # Atom serial
+        self.assertEqual(pdb_content[0][12:16], " N  ")        # Atom name
+        self.assertEqual(pdb_content[0][17:20], "GLY")         # Residue name
+        self.assertEqual(pdb_content[0][21], "A")              # Chain ID
+        self.assertEqual(pdb_content[0][22:26].strip(), "1")   # Residue sequence number
+        self.assertAlmostEqual(float(pdb_content[0][30:38]), 1.000) # X
+        self.assertEqual(pdb_content[0][76:78].strip(), "N")   # Element
+
+        # Check last atom (ALA, CB)
+        # Atom serial 9 (4 for GLY + 5 for ALA)
+        # map_atom_info_to_pdb_atom_name for ALA CB (5th atom, 4th heavy index) gives " CB "
+        # ALA is res_entry[3]=1 -> PDB res_num 2
+        self.assertEqual(pdb_content[8][7:11].strip(), "9")
+        self.assertEqual(pdb_content[8][12:16], " CB ")
+        self.assertEqual(pdb_content[8][17:20], "ALA")
+        self.assertEqual(pdb_content[8][21], "A")
+        self.assertEqual(pdb_content[8][22:26].strip(), "2")
+        self.assertAlmostEqual(float(pdb_content[8][38:46]), 3.400) # Y coord for ALA CB
+        self.assertEqual(pdb_content[8][76:78].strip(), "C")
+
+
+    # --- Tests for existing functions (may need minor path adjustments if called by main) ---
     @patch('subprocess.run')
-    def test_add_hydrogens_success(self, mock_subprocess_run):
-        # Mock a successful pdb2pqr30 run
+    def test_add_hydrogens_success(self, mock_subprocess_run): # No change needed for direct test
+        mock_process = MagicMock()
         mock_process = MagicMock()
         mock_process.returncode = 0
         mock_process.stdout = "PDB2PQR successful"
@@ -138,9 +305,9 @@ class TestProcessNoesy(unittest.TestCase):
         self.assertEqual(len(atoms), 3)
 
 
-    @patch('scripts.process.process_noesy.get_atoms') # Mock get_atoms within generate_noesy_data
-    @patch('Bio.PDB.PDBParser.get_structure')
-    @patch('random.sample')
+    @patch('Bio.PDB.PDBParser.get_structure') # generate_noesy_data uses this
+    @patch('scripts.process.process_noesy.get_atoms') # generate_noesy_data uses this
+    @patch('random.sample') # generate_noesy_data uses this
     @patch('random.choice')
     @patch('random.randint')
     @patch('random.uniform')
@@ -222,53 +389,80 @@ class TestProcessNoesy(unittest.TestCase):
         self.assertTrue(found_noisy, "Expected noisy peak not found or has unexpected format.")
 
 
+    @patch('scripts.process.process_noesy.parse_npz')
+    @patch('scripts.process.process_noesy.write_temp_pdb_from_npz')
     @patch('scripts.process.process_noesy.add_hydrogens')
     @patch('scripts.process.process_noesy.generate_noesy_data')
     @patch('os.makedirs')
     @patch('os.path.exists')
+    @patch('os.listdir')
     @patch('builtins.open', new_callable=mock_open)
-    @patch('tempfile.mkstemp', return_value=(None, 'dummy_temp_h.pdb'))
+    @patch('tempfile.NamedTemporaryFile') # Mock NamedTemporaryFile
     @patch('os.remove')
-    def test_main_cli(self, mock_os_remove, mock_mkstemp, mock_file_open, mock_os_exists, mock_os_makedirs,
-                      mock_generate_noesy, mock_add_hydrogens):
+    @patch('os.path.getsize') # To mock checks on temp file sizes
+    def test_main_cli_npz(self, mock_os_getsize, mock_os_remove, mock_named_temp_file,
+                          mock_file_open, mock_os_listdir, mock_os_exists, mock_os_makedirs,
+                          mock_generate_noesy, mock_add_hydrogens,
+                          mock_write_pdb, mock_parse_npz):
 
-        # Mock return values
-        mock_os_exists.side_effect = lambda path: True if path == "input_dir" else False # output_dir will not exist initially
-        mock_generate_noesy.return_value = ["NOESY_LINE_1", "NOESY_LINE_2"]
+        # --- Setup Mocks ---
+        # Mock os.path.exists: input_dir exists, output_dir does not initially
+        mock_os_exists.side_effect = lambda path_arg: path_arg == "input_npz_dir"
 
-        # Test arguments
+        # Mock os.listdir to return one .npz file
+        mock_os_listdir.return_value = ["protein1.npz"]
+
+        # Mock parse_npz to return our mock NPZ data
+        mock_parse_npz.return_value = self.mock_npz_data
+
+        # Mock generate_noesy_data to return some NOESY lines
+        mock_generate_noesy.return_value = ["NOESY_LINE_FROM_NPZ_1", "NOESY_LINE_FROM_NPZ_2"]
+
+        # Mock tempfile.NamedTemporaryFile to control temp file names
+        # We need two temp files: initial PDB, then hydrogenated PDB
+        mock_temp_initial_pdb = MagicMock()
+        mock_temp_initial_pdb.name = "temp_initial.pdb"
+
+        mock_temp_hydro_pdb = MagicMock()
+        mock_temp_hydro_pdb.name = "temp_hydro.pdb"
+
+        # Ensure the context manager __enter__ returns the mock object itself
+        mock_named_temp_file.side_effect = [mock_temp_initial_pdb, mock_temp_hydro_pdb]
+
+        # Mock os.path.getsize to simulate non-empty files being created
+        mock_os_getsize.return_value = 100
+
+        # --- Test Arguments ---
         test_args = argparse.Namespace(
-            input_dir="input_dir",
-            output_dir="output_dir",
-            distance_cutoff=6.0
+            input_dir="input_npz_dir",
+            output_dir="output_noesy_dir",
+            distance_cutoff=5.5
         )
         with patch('argparse.ArgumentParser.parse_args', return_value=test_args):
-            # Mock listdir to return one PDB file
-            with patch('os.listdir', return_value=["test.pdb"]):
-                 # Mock os.path.getsize for the hydrogenated file check
-                with patch('os.path.getsize', return_value=100): # Simulate non-empty file
-                    process_noesy_main()
+            process_noesy_main()
 
-        mock_os_makedirs.assert_called_once_with("output_dir")
+        # --- Assertions ---
+        mock_os_listdir.assert_called_once_with("input_npz_dir")
+        mock_parse_npz.assert_called_once_with(os.path.join("input_npz_dir", "protein1.npz"))
 
-        # Check that add_hydrogens was called for the temp file
-        # mkstemp returns ('fd', 'path'), we mocked path to 'dummy_temp_h.pdb'
-        # input file for add_hydrogens is os.path.join("input_dir", "test.pdb")
-        expected_input_pdb_path = os.path.join("input_dir", "test.pdb")
-        mock_add_hydrogens.assert_called_once_with(expected_input_pdb_path, 'dummy_temp_h.pdb')
+        # Check write_temp_pdb_from_npz call
+        mock_write_pdb.assert_called_once_with(self.mock_npz_data, "temp_initial.pdb")
 
-        # Check generate_noesy_data call
-        mock_generate_noesy.assert_called_once_with('dummy_temp_h.pdb', 6.0)
+        # Check add_hydrogens call (input is initial_pdb, output is hydro_pdb)
+        mock_add_hydrogens.assert_called_once_with("temp_initial.pdb", "temp_hydro.pdb")
+
+        # Check generate_noesy_data call (input is hydro_pdb)
+        mock_generate_noesy.assert_called_once_with("temp_hydro.pdb", 5.5)
 
         # Check output file writing
-        expected_output_file = os.path.join("output_dir", "test_noesy.txt")
+        expected_output_file = os.path.join("output_noesy_dir", "protein1_noesy.txt")
         mock_file_open.assert_called_once_with(expected_output_file, "w")
         handle = mock_file_open()
-        handle.write.assert_any_call("NOESY_LINE_1\n")
-        handle.write.assert_any_call("NOESY_LINE_2\n")
+        handle.write.assert_any_call("NOESY_LINE_FROM_NPZ_1\n")
 
         # Check temp file removal
-        mock_os_remove.assert_called_once_with('dummy_temp_h.pdb')
+        expected_remove_calls = [call("temp_initial.pdb"), call("temp_hydro.pdb")]
+        mock_os_remove.assert_has_calls(expected_remove_calls, any_order=True)
 
 
 if __name__ == '__main__':
