@@ -122,6 +122,8 @@ class TestProcessNoesy(unittest.TestCase):
 
     def setUp(self):
         self.mock_npz_data = get_mock_npz_data()
+        self.dummy_input_pdb = "dummy_input.pdb"
+        self.dummy_output_pdb = "dummy_output.pdb"
 
     # --- Tests for new NPZ functions ---
     @patch('numpy.load')
@@ -220,47 +222,125 @@ class TestProcessNoesy(unittest.TestCase):
         self.assertEqual(pdb_content[8][76:78].strip(), "C")
 
 
-    # --- Tests for existing functions (may need minor path adjustments if called by main) ---
+    # --- Tests for add_hydrogens (updated for new error handling and logging) ---
+    @patch('scripts.process.process_noesy.logger')
+    @patch('os.path.getsize')
+    @patch('os.path.exists')
     @patch('subprocess.run')
-    def test_add_hydrogens_success(self, mock_subprocess_run): # No change needed for direct test
-        mock_process = MagicMock()
-        mock_process = MagicMock()
-        mock_process.returncode = 0
-        mock_process.stdout = "PDB2PQR successful"
-        mock_process.stderr = ""
-        mock_subprocess_run.return_value = mock_process
+    def test_add_hydrogens_success(self, mock_subprocess_run, mock_os_exists, mock_os_getsize, mock_logger):
+        mock_cp = MagicMock(spec=subprocess.CompletedProcess)
+        mock_cp.returncode = 0
+        mock_cp.stdout = "pdb2pqr ran okay"
+        mock_cp.stderr = ""
+        mock_subprocess_run.return_value = mock_cp
 
-        input_pdb = "input.pdb"
-        output_pdb = "output_with_h.pdb"
+        mock_os_exists.return_value = True
+        mock_os_getsize.return_value = 100 # Non-empty file
 
-        # Create a dummy output file to simulate pdb2pqr30 creating it
-        # In a real test, we might want to check if it *tries* to create it
-        # For this mock, we'll assume it's fine if it's called.
-        # To check os.path.exists, we can patch it or ensure the file is made.
-        with patch('os.path.exists') as mock_os_exists:
-            mock_os_exists.return_value = True # Simulate output file creation
-            add_hydrogens(input_pdb, output_pdb)
+        result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
 
-        expected_command = [
-            PDB2PQR_PATH,
-            "--ff=AMBER",
-            "--pdb-output",
-            input_pdb,
-            output_pdb
-        ]
-        mock_subprocess_run.assert_called_once_with(
-            expected_command, capture_output=True, text=True, check=True
+        self.assertTrue(result)
+        mock_subprocess_run.assert_called_once()
+        # Check if logger.info was called with expected messages
+        self.assertIn(call(f"Calling pdb2pqr30 for {self.dummy_input_pdb}..."), mock_logger.info.call_args_list)
+        self.assertIn(call(f"pdb2pqr30 completed successfully for {self.dummy_input_pdb}."), mock_logger.info.call_args_list)
+
+
+    @patch('scripts.process.process_noesy.logger')
+    @patch('subprocess.run')
+    def test_add_hydrogens_pdb2pqr_failure(self, mock_subprocess_run, mock_logger):
+        mock_cp = MagicMock(spec=subprocess.CompletedProcess)
+        mock_cp.returncode = 1
+        mock_cp.stdout = "Error output from pdb2pqr"
+        mock_cp.stderr = "Detailed error from pdb2pqr"
+        mock_subprocess_run.return_value = mock_cp
+
+        result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
+
+        self.assertFalse(result)
+        mock_logger.error.assert_any_call(f"pdb2pqr30 failed for {self.dummy_input_pdb} with return code 1")
+        mock_logger.error.assert_any_call(f"pdb2pqr30 stdout:\n{mock_cp.stdout}")
+        mock_logger.error.assert_any_call(f"pdb2pqr30 stderr:\n{mock_cp.stderr}")
+
+    @patch('scripts.process.process_noesy.logger')
+    @patch('subprocess.run')
+    def test_add_hydrogens_pdb2pqr_timeout(self, mock_subprocess_run, mock_logger):
+        mock_subprocess_run.side_effect = subprocess.TimeoutExpired(
+            cmd="pdb2pqr_command",
+            timeout=600,
+            stdout=b"partial stdout before timeout", # Bytes
+            stderr=b"partial stderr before timeout"  # Bytes
         )
 
-    @patch('subprocess.run')
-    def test_add_hydrogens_failure(self, mock_subprocess_run):
-        # Mock a failed pdb2pqr30 run
-        mock_subprocess_run.side_effect = subprocess.CalledProcessError(
-            returncode=1, cmd="pdb2pqr30", stderr="PDB2PQR error"
-        )
-        with self.assertRaises(subprocess.CalledProcessError):
-            add_hydrogens("input.pdb", "output.pdb")
+        result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
+        self.assertFalse(result)
+        mock_logger.error.assert_any_call(f"pdb2pqr30 timed out for {self.dummy_input_pdb} after 600 seconds.")
+        mock_logger.error.assert_any_call("pdb2pqr30 stdout (on timeout):\npartial stdout before timeout")
+        mock_logger.error.assert_any_call("pdb2pqr30 stderr (on timeout):\npartial stderr before timeout")
 
+    @patch('scripts.process.process_noesy.logger')
+    @patch('os.path.getsize')
+    @patch('os.path.exists')
+    @patch('subprocess.run')
+    def test_add_hydrogens_pdb2pqr_output_file_missing(self, mock_subprocess_run, mock_os_exists, mock_os_getsize, mock_logger):
+        mock_cp = MagicMock(spec=subprocess.CompletedProcess)
+        mock_cp.returncode = 0
+        mock_cp.stdout = "pdb2pqr ran okay, but no file created by test"
+        mock_cp.stderr = ""
+        mock_subprocess_run.return_value = mock_cp
+
+        mock_os_exists.return_value = False # Simulate output file not existing
+
+        result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
+        self.assertFalse(result)
+        mock_logger.error.assert_any_call(f"pdb2pqr30 reported success, but output file {self.dummy_output_pdb} is missing or empty.")
+
+    @patch('scripts.process.process_noesy.logger')
+    @patch('os.path.getsize')
+    @patch('os.path.exists')
+    @patch('subprocess.run')
+    def test_add_hydrogens_pdb2pqr_output_file_empty(self, mock_subprocess_run, mock_os_exists, mock_os_getsize, mock_logger):
+        mock_cp = MagicMock(spec=subprocess.CompletedProcess)
+        mock_cp.returncode = 0
+        mock_cp.stdout = "pdb2pqr ran okay, but empty file created by test"
+        mock_cp.stderr = ""
+        mock_subprocess_run.return_value = mock_cp
+
+        mock_os_exists.return_value = True
+        mock_os_getsize.return_value = 0 # Simulate empty output file
+
+        result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
+        self.assertFalse(result)
+        mock_logger.error.assert_any_call(f"pdb2pqr30 reported success, but output file {self.dummy_output_pdb} is missing or empty.")
+
+
+    @patch('scripts.process.process_noesy.logger')
+    @patch('subprocess.run')
+    def test_add_hydrogens_pdb2pqr_not_found(self, mock_subprocess_run, mock_logger):
+        mock_subprocess_run.side_effect = FileNotFoundError(f"No such file or directory: '{PDB2PQR_PATH}'")
+
+        result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
+        self.assertFalse(result)
+        mock_logger.error.assert_any_call(
+            f"pdb2pqr30 command not found at {PDB2PQR_PATH}. Please ensure PDB2PQR is installed and the path is correct."
+        )
+
+    @patch('scripts.process.process_noesy.logger')
+    @patch('subprocess.run')
+    @patch('traceback.format_exc', return_value="Traceback details") # Mock traceback
+    def test_add_hydrogens_unexpected_subprocess_error(self, mock_traceback_format, mock_subprocess_run, mock_logger):
+        test_exception = Exception("Unexpected Kaboom!")
+        mock_subprocess_run.side_effect = test_exception
+
+        result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
+        self.assertFalse(result)
+        mock_logger.error.assert_any_call(
+            f"An unexpected error occurred while running pdb2pqr30 for {self.dummy_input_pdb}: {test_exception}"
+        )
+        mock_logger.error.assert_any_call("Traceback details")
+
+
+    # --- Tests for get_atoms and generate_noesy_data (can largely remain as they test core logic) ---
     def test_get_atoms(self):
         # Create a simple structure for testing
         # Residue 1: Glycine (only backbone H)

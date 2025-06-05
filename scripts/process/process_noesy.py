@@ -4,6 +4,8 @@ import random
 import subprocess
 import tempfile
 import logging # For better error messages
+import traceback # For detailed error logging
+# import shutil # Not currently used but often useful with temp files
 
 from Bio.PDB import PDBParser # MMCIFParser might not be needed if input is PDB from NPZ
 from Bio.PDB.vectors import Vector # Not directly used by new functions but kept for get_atoms
@@ -53,6 +55,62 @@ BACKBONE_AMIDE = "H"
 
 PDB2PQR_PATH = "/home/swebot/.local/bin/pdb2pqr30" # Path to pdb2pqr executable
 
+
+def add_hydrogens(pdb_file: str, output_pdb_file: str) -> bool:
+    """
+    Adds hydrogen atoms to a PDB file using PDB2PQR.
+    Shells out to the pdb2pqr30 command-line tool.
+    Returns True on success, False on failure.
+    """
+    command = [
+        PDB2PQR_PATH,
+        "--ff=AMBER",      # Force field
+        "--pdb-output",    # Request PDB output with hydrogens
+        pdb_file,
+        output_pdb_file
+    ]
+
+    logger.info(f"Calling pdb2pqr30 for {pdb_file}...")
+    logger.info(f"Command: {' '.join(command)}")
+
+    try:
+        completed_process = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=600,  # 10-minute timeout
+            check=False   # Do not raise exception on non-zero exit
+        )
+
+        if completed_process.returncode != 0:
+            logger.error(f"pdb2pqr30 failed for {pdb_file} with return code {completed_process.returncode}")
+            logger.error(f"pdb2pqr30 stdout:\n{completed_process.stdout}")
+            logger.error(f"pdb2pqr30 stderr:\n{completed_process.stderr}")
+            return False
+        else:
+            logger.info(f"pdb2pqr30 completed successfully for {pdb_file}.")
+            if not os.path.exists(output_pdb_file) or os.path.getsize(output_pdb_file) == 0:
+                logger.error(f"pdb2pqr30 reported success, but output file {output_pdb_file} is missing or empty.")
+                logger.error(f"pdb2pqr30 stdout (when output file missing/empty):\n{completed_process.stdout}")
+                logger.error(f"pdb2pqr30 stderr (when output file missing/empty):\n{completed_process.stderr}")
+                return False
+            return True
+
+    except subprocess.TimeoutExpired as e:
+        logger.error(f"pdb2pqr30 timed out for {pdb_file} after {e.timeout} seconds.")
+        if e.stdout: # stdout/stderr might be bytes if timeout occurred very early
+            logger.error(f"pdb2pqr30 stdout (on timeout):\n{e.stdout.decode(errors='replace') if isinstance(e.stdout, bytes) else e.stdout}")
+        if e.stderr:
+            logger.error(f"pdb2pqr30 stderr (on timeout):\n{e.stderr.decode(errors='replace') if isinstance(e.stderr, bytes) else e.stderr}")
+        return False
+    except FileNotFoundError:
+        logger.error(f"pdb2pqr30 command not found at {PDB2PQR_PATH}. "
+                     "Please ensure PDB2PQR is installed and the path is correct.")
+        return False
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while running pdb2pqr30 for {pdb_file}: {e}")
+        logger.error(traceback.format_exc())
+        return False
 
 # --- New NPZ Processing Functions ---
 
@@ -271,44 +329,8 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
 # --- End of New NPZ Processing Functions ---
 
 
-def add_hydrogens(pdb_file, output_pdb_file):
-    """
-    Adds hydrogen atoms to a PDB file using PDB2PQR.
-    Shells out to the pdb2pqr30 command-line tool.
-    """
-    try:
-        # pdb2pqr30 --ff=AMBER --titration-state-method=propka --with-ph=7.0 <input_pdb> <output_pqr>
-        # We want PDB output, so we use a temporary pqr file and then convert, or see if pdb2pqr can output PDB directly
-        # Looking at pdb2pqr help, it seems it outputs PQR format.
-        # For this task, we'll assume that PDB2PQR adds hydrogens and the output can be parsed by BioPython.
-        # The --pdb-output flag can be used with pdb2pqr30 for compatible versions.
-        # If not, a conversion step might be needed or careful parsing of PQR.
-        # Let's try with --pdb-output first.
-        command = [
-            PDB2PQR_PATH,
-            "--ff=AMBER",  # Force field
-            "--pdb-output", # Request PDB output with hydrogens
-            pdb_file,
-            output_pdb_file
-        ]
-        print(f"Running PDB2PQR: {' '.join(command)}")
-        result = subprocess.run(command, capture_output=True, text=True, check=True)
-        print(f"PDB2PQR stdout: {result.stdout}")
-        if result.stderr:
-            print(f"PDB2PQR stderr: {result.stderr}")
-        if not os.path.exists(output_pdb_file):
-            raise FileNotFoundError(f"PDB2PQR did not generate the output file: {output_pdb_file}")
-        print(f"Successfully added hydrogens: {output_pdb_file}")
-    except subprocess.CalledProcessError as e:
-        print(f"Error running PDB2PQR for {pdb_file}: {e}")
-        print(f"PDB2PQR stdout: {e.stdout}")
-        print(f"PDB2PQR stderr: {e.stderr}")
-        raise  # Re-raise the exception to be handled by the caller
-    except FileNotFoundError as e:
-        print(f"Error: {e}")
-        # This might happen if PDB2PQR_PATH is incorrect or pdb2pqr30 is not executable
-        print(f"Please ensure {PDB2PQR_PATH} is correct and executable.")
-        raise
+# --- Original functions get_atoms, generate_noesy_data remain unchanged ---
+# ... (get_atoms and generate_noesy_data functions are here, unchanged from previous version) ...
 
 def get_atoms(structure):
     """
@@ -504,12 +526,17 @@ def main():
             with tempfile.NamedTemporaryFile(mode="w+", suffix=".pdb", delete=False) as tmp_pdb_h:
                  temp_hydro_pdb_file = tmp_pdb_h.name
 
-            add_hydrogens(temp_initial_pdb_file, temp_hydro_pdb_file)
-            logger.info(f"Generated PDB with hydrogens: {temp_hydro_pdb_file}")
+            hydro_added_successfully = add_hydrogens(temp_initial_pdb_file, temp_hydro_pdb_file)
 
-            if not os.path.exists(temp_hydro_pdb_file) or os.path.getsize(temp_hydro_pdb_file) == 0:
-                logger.error(f"Hydrogen addition failed or produced an empty file for {npz_filename}, skipping.")
+            if not hydro_added_successfully:
+                logger.error(f"Skipping NOESY generation for {npz_file_path} due to hydrogen addition failure.")
+                # The finally block will handle cleanup of temp_initial_pdb_file.
+                # temp_hydro_pdb_file might not exist or be empty but cleanup will be attempted.
                 continue
+
+            # If add_hydrogens was successful, temp_hydro_pdb_file should exist and be non-empty.
+            # No need for explicit check here again if add_hydrogens guarantees it on True return.
+            logger.info(f"Successfully added hydrogens: {temp_hydro_pdb_file}")
 
             # 4. Generate NOESY data from the hydrogenated PDB
             noesy_data = generate_noesy_data(temp_hydro_pdb_file, args.distance_cutoff)
