@@ -7,6 +7,7 @@ import logging # For better error messages
 import traceback # For detailed error logging
 from pathlib import Path # Ensure Path is imported
 import shutil # For copying debug PDB files
+# Re-submission to ensure code sync for chain_processed_atom_count initialization.
 
 from Bio.PDB import PDBParser # MMCIFParser might not be needed if input is PDB from NPZ
 from Bio.PDB.vectors import Vector # Not directly used by new functions but kept for get_atoms
@@ -298,6 +299,7 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
     with open(temp_pdb_path, 'w', encoding='utf-8') as f:
         # Iterate through chains as defined in chains_data
         for chain_idx_in_npz, chain_entry in enumerate(chains_data):
+            chain_processed_atom_count = 0 # Ensure this is initialized for each chain
             if len(chain_entry) < 9: # Updated length check for indices 7 and 8
                 logger.warning(f"Chain entry {chain_idx_in_npz} has too few fields (needs at least 9): {chain_entry}. Skipping chain.")
                 continue
