@@ -322,20 +322,22 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
                 res_entry_original = residues_data[res_idx_global_in_residues_array]
 
                 # New interpretation based on request:
-                # New interpretation based on request:
+                # New interpretation based on request, including is_standard_residue:
                 # [0]: res_name
                 # [2]: res_seq_num_in_chain_0idx (for PDB numbering)
                 # [3]: atom_start_global_idx
                 # [4]: num_atoms_in_res_npz
-                if len(res_entry_original) < 5: # Need at least up to index 4 for these fields
-                     logger.warning(f"Residue entry {res_idx_global_in_residues_array} has too few fields for current indexing: {res_entry_original}. Skipping residue for chain {chain_pdb_id}.")
+                # [7]: is_standard_residue (boolean)
+                if len(res_entry_original) < 8: # Need at least up to index 7 for these fields
+                     logger.warning(f"Residue entry {res_idx_global_in_residues_array} has too few fields (needs at least 8): {res_entry_original}. Skipping residue for chain {chain_pdb_id}.")
                      continue
 
                 res_name = str(res_entry_original[0])
-                res_seq_num_for_pdb = int(res_entry_original[2]) + 1 # New source for PDB residue number
-
+                res_seq_num_for_pdb = int(res_entry_original[2]) + 1
                 atom_start_global_idx = int(res_entry_original[3])
                 num_atoms_in_res_npz = int(res_entry_original[4])
+                is_standard_residue = bool(res_entry_original[7])
+                record_type = "ATOM  " if is_standard_residue else "HETATM"
 
                 # print(f"DEBUG:   Residue: {res_name}{res_seq_num_for_pdb} (Chain {chain_pdb_id}), NPZ res_glbl_idx: {res_idx_global_in_residues_array}, atom_start: {atom_start_global_idx}, num_atoms: {num_atoms_in_res_npz}", flush=True) # Commented out as per request
 
@@ -382,11 +384,12 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
                     element_symbol = ATOMIC_NUMBER_TO_SYMBOL.get(atomic_number, 'X').rjust(2) # Right justify for PDB
 
                     atom_serial += 1
+                    chain_processed_atom_count += 1 # Increment per-chain atom counter
 
                     # Using res_name[:3] to ensure it's max 3 chars for PDB
                     # atom_name_pdb from decode_atom_name_from_4i1 should already be 4 chars.
                     pdb_line = (
-                        f"ATOM  {atom_serial:5d} {atom_name_pdb}{res_name[:3]:<3s} {chain_pdb_id:1s}{res_seq_num_for_pdb:4d}    " # Use atom_name_pdb directly
+                        f"{record_type}{atom_serial:5d} {atom_name_pdb}{res_name[:3]:<3s} {chain_pdb_id:1s}{res_seq_num_for_pdb:4d}    "
                         f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          {element_symbol:<2s}\n"
                     )
                     f.write(pdb_line)
@@ -395,9 +398,14 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
                         print(f"DEBUG:       ... {atoms_written_count} atoms written to PDB ...", flush=True)
                         logger.info(f"DEBUG: ... {atoms_written_count} atoms written to PDB for {npz_data.get('id', 'UNKNOWN_FILE')} ...")
 
+            # After processing all residues in a chain, add TER record if any atoms were written for this chain
+            if chain_processed_atom_count > 0:
+                ter_serial = atom_serial + 1 # Serial for TER is last atom's serial + 1
+                f.write(f"TER   {ter_serial:5d}      {res_name[:3]:<3s} {chain_pdb_id:1s}{res_seq_num_for_pdb:4d}\n")
+
         f.write("END\n") # Add newline to END record
     print(f"DEBUG: Exiting write_temp_pdb_from_npz for temp file {temp_pdb_path}, total atoms written: {atoms_written_count}", flush=True)
-    if atoms_written_count == 0 and atom_serial == 0 : # atom_serial would only be 0 if no residues processed at all
+    if atoms_written_count == 0 and atom_serial == 0 :
         logger.warning(f"No atoms were written to temporary PDB file: {temp_pdb_path}. NPZ parsing or chain/residue iteration might have issues.")
 
 # --- End of New NPZ Processing Functions ---
