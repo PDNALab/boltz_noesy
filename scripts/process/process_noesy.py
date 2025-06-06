@@ -263,16 +263,16 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
     with open(temp_pdb_path, 'w', encoding='utf-8') as f:
         # Iterate through chains as defined in chains_data
         for chain_idx_in_npz, chain_entry in enumerate(chains_data):
-            if len(chain_entry) < 7:
-                logger.warning(f"Chain entry {chain_idx_in_npz} has too few fields: {chain_entry}. Skipping chain.")
+            if len(chain_entry) < 9: # Updated length check for indices 7 and 8
+                logger.warning(f"Chain entry {chain_idx_in_npz} has too few fields (needs at least 9): {chain_entry}. Skipping chain.")
                 continue
 
             chain_pdb_id_raw = str(chain_entry[0])
             chain_pdb_id = chain_pdb_id_raw.strip() if chain_pdb_id_raw.strip() else 'A' # Default if empty after strip
             if len(chain_pdb_id) > 1: chain_pdb_id = chain_pdb_id[0] # Take first char if multi-char
 
-            res_start_idx_in_residues_array = int(chain_entry[5])
-            num_residues_in_chain = int(chain_entry[6])
+            res_start_idx_in_residues_array = int(chain_entry[7]) # Changed from 5 to 7
+            num_residues_in_chain = int(chain_entry[8]) # Changed from 6 to 8
             print(f"DEBUG: Processing Chain ID: {chain_pdb_id}, NPZ chain_idx: {chain_idx_in_npz}, num_residues: {num_residues_in_chain}, res_start_idx: {res_start_idx_in_residues_array}", flush=True)
 
             # Iterate through residues in this chain
