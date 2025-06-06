@@ -6,7 +6,7 @@ import tempfile
 import logging # For better error messages
 import traceback # For detailed error logging
 from pathlib import Path # Ensure Path is imported
-# import shutil # Not currently used but often useful with temp files
+import shutil # For copying debug PDB files
 
 from Bio.PDB import PDBParser # MMCIFParser might not be needed if input is PDB from NPZ
 from Bio.PDB.vectors import Vector # Not directly used by new functions but kept for get_atoms
@@ -567,6 +567,16 @@ def main():
             print(f"DEBUG: Calling write_temp_pdb_from_npz for {npz_file_path}", flush=True)
             write_temp_pdb_from_npz(npz_data, temp_initial_pdb_name)
             print(f"DEBUG: Finished write_temp_pdb_from_npz for {npz_file_path}", flush=True)
+
+            # Save a copy of the initial PDB for debugging pdb2pqr
+            if temp_initial_pdb_name and os.path.exists(temp_initial_pdb_name):
+                debug_pdb_name = f"{name_part_npz}_debug_initial.pdb"
+                debug_pdb_path = os.path.join(args.output_dir, debug_pdb_name)
+                try:
+                    shutil.copy2(temp_initial_pdb_name, debug_pdb_path)
+                    logger.info(f"Saved debug PDB for pdb2pqr input to: {debug_pdb_path}")
+                except Exception as e_copy:
+                    logger.error(f"Could not copy debug PDB to {debug_pdb_path}: {e_copy}")
 
             if not os.path.exists(temp_initial_pdb_name) or os.path.getsize(temp_initial_pdb_name) == 0:
                 logger.error(f"Initial PDB file {temp_initial_pdb_name} was not created or is empty after write_temp_pdb_from_npz. Skipping {npz_filename}.")
