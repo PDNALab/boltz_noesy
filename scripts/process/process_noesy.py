@@ -116,6 +116,41 @@ def add_hydrogens(pdb_file: str, output_pdb_file: str) -> bool:
 
 # --- New NPZ Processing Functions ---
 
+def decode_atom_name_from_4i1(encoded_name: np.ndarray) -> str:
+    """
+    Decodes a 4-integer array (presumably from ord(c) - 32) into a PDB atom name.
+    """
+    try:
+        chars = []
+        for val in encoded_name:
+            if val == 0:  # Null terminator or padding
+                break
+            char = chr(int(val) + 32) # Assuming encoding was ord(c) - 32
+            chars.append(char)
+        name = "".join(chars).strip()
+
+        # Format to 4 characters for PDB, attempting common conventions.
+        if len(name) == 4: # e.g., "HD21"
+            return name
+        elif len(name) == 3: # e.g., "OXT", "HG1" (H on gamma C1)
+            # If numeric is first, like "1HG", usually means H is first on G. PDB: "1HG "
+            # If alpha is first, like "OXT", PDB: "OXT "
+            return f"{name:<4}"
+        elif len(name) == 2: # e.g., "CA", "SD"
+            return f" {name:<2} " # Pad with space on left and right: " CA ", " SD "
+        elif len(name) == 1: # e.g., "N", "C", "O"
+            return f" {name}  "  # Pad with space on left and two on right: " N  "
+        elif len(name) == 0:
+             logger.warning(f"Decoded atom name from {encoded_name} is empty. Using fallback 'UNK'.")
+             return "UNK " # Fallback, 4-chars
+        else: # Longer than 4, truncate (should not happen with 4i1 if properly decoded)
+            logger.warning(f"Decoded atom name '{name}' from {encoded_name} is longer than 4 chars. Truncating.")
+            return name[:4]
+
+    except Exception as e:
+        logger.error(f"Error decoding atom name from {encoded_name}: {e}. Using fallback 'ERR'.")
+        return "ERR " # Error fallback, 4-chars
+
 def parse_npz(npz_file_path: str) -> dict:
     """
     Loads specified arrays from an .npz file.
@@ -332,12 +367,12 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
 
                     x, y, z = coord_list_from_atom_entry[0], coord_list_from_atom_entry[1], coord_list_from_atom_entry[2]
 
-                    atom_name_pdb = map_atom_info_to_pdb_atom_name(
-                        atom_npz_entry_original,
-                        res_name,
-                        atom_offset_in_residue,
-                        all_atom_entries_for_this_residue_npz
-                    )
+                    # Use decode_atom_name_from_4i1 instead of map_atom_info_to_pdb_atom_name
+                    if len(atom_npz_entry_original) == 0 or not hasattr(atom_npz_entry_original[0], '__iter__'):
+                        logger.warning(f"Atom {global_atom_idx_for_atoms_array} in file {npz_data.get('id', 'UNKNOWN_FILE')} has invalid encoded name field: {atom_npz_entry_original[0]!r}. Skipping ATOM.")
+                        continue
+                    encoded_name_field = atom_npz_entry_original[0]
+                    atom_name_pdb = decode_atom_name_from_4i1(encoded_name_field)
 
                     # Ensure atomic_number is accessible and valid
                     if len(atom_npz_entry_original) < 2 : # Should have been caught by len < 4 if coords are at [3]
@@ -349,9 +384,10 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
                     atom_serial += 1
 
                     # Using res_name[:3] to ensure it's max 3 chars for PDB
+                    # atom_name_pdb from decode_atom_name_from_4i1 should already be 4 chars.
                     pdb_line = (
-                        f"ATOM  {atom_serial:5d} {atom_name_pdb:<4s}{res_name[:3]:<3s} {chain_pdb_id:1s}{res_seq_num_for_pdb:4d}    "
-                        f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          {element_symbol:<2s}\n" # Note: \n added
+                        f"ATOM  {atom_serial:5d} {atom_name_pdb}{res_name[:3]:<3s} {chain_pdb_id:1s}{res_seq_num_for_pdb:4d}    " # Use atom_name_pdb directly
+                        f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          {element_symbol:<2s}\n"
                     )
                     f.write(pdb_line)
                     atoms_written_count += 1
