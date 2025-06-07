@@ -41,48 +41,55 @@ def get_mock_npz_data():
     coords_gly_ca  = [1.1, 2.1, 3.1]
     coords_gly_c   = [1.2, 2.2, 3.2]
     coords_gly_o   = [1.3, 2.3, 3.3]
-    coords_ala_n   = [2.0, 3.0, 4.0]
-    coords_ala_ca  = [2.1, 3.1, 4.1]
-    coords_ala_c   = [2.2, 3.2, 4.2]
-    coords_ala_o   = [2.3, 3.3, 4.3]
-    coords_ala_cb  = [2.4, 3.4, 4.4]
-    coords_ala_oxt = [2.5, 3.5, 4.5] # For C-terminal ALA OXT
+
+    # Coords for TYR (Residue 2)
+    coords_tyr_n   = [2.0, 3.0, 4.0]
+    coords_tyr_ca  = [2.1, 3.1, 4.1]
+    coords_tyr_c   = [2.2, 3.2, 4.2]
+    coords_tyr_o   = [2.3, 3.3, 4.3] # Main carbonyl O
+    coords_tyr_cb  = [2.4, 3.4, 4.4]
+    coords_tyr_cg  = [2.5, 3.5, 4.5]
+    coords_tyr_cd1 = [2.6, 3.6, 4.6]
+    coords_tyr_ce1 = [2.7, 3.7, 4.7]
+    coords_tyr_cz  = [2.8, 3.8, 4.8]
+    coords_tyr_oh  = [2.9, 3.9, 4.9] # Side-chain hydroxyl O
+    coords_tyr_oxt = [2.25, 3.15, 5.15] # C-terminal OXT
 
     mock_atoms_data = [
         # Res1: GLY (N, CA, C, O) - 4 atoms
         # (type_info, atomic_num, placeholder_int, [x,y,z], other_vector, bool_flag, chain_idx)
-        ((46,0,0,0), 7, 0, coords_gly_n,  [0.0]*3, True, 0), # N
-        ((46,0,0,0), 6, 0, coords_gly_ca, [0.0]*3, True, 0), # CA
-        ((46,0,0,0), 6, 0, coords_gly_c,  [0.0]*3, True, 0), # C
-        ((46,0,0,0), 8, 0, coords_gly_o,  [0.0]*3, True, 0), # O
-        # Res2: ALA (N, CA, C, O, CB) - 5 atoms
-        ((46,0,0,0), 7, 0, coords_ala_n,  [0.0]*3, True, 0), # N
-        ((46,0,0,0), 6, 0, coords_ala_ca, [0.0]*3, True, 0), # CA
-        ((46,0,0,0), 6, 0, coords_ala_c,  [0.0]*3, True, 0), # C
-        ((46,0,0,0), 8, 0, coords_ala_o,  [0.0]*3, True, 0), # O
-        ((46,0,0,0), 6, 0, coords_ala_cb, [0.0]*3, True, 0), # CB
-        ((46,0,0,0), 8, 0, coords_ala_oxt, [0.0]*3, True, 0) # OXT for ALA (atomic_num 8)
+        ((0,0,0,0), 7, 0, coords_gly_n,  [0.0]*3, True, 0), # N
+        ((0,0,0,0), 6, 0, coords_gly_ca, [0.0]*3, True, 0), # CA
+        ((0,0,0,0), 6, 0, coords_gly_c,  [0.0]*3, True, 0), # C
+        ((0,0,0,0), 8, 0, coords_gly_o,  [0.0]*3, True, 0), # O
+        # Res2: TYR (N, CA, C, O, CB, CG, CD1, CE1, CZ, OH, OXT) - 11 atoms
+        ((0,0,0,0), 7, 0, coords_tyr_n,   [0.0]*3, True, 0), # N (idx 4)
+        ((0,0,0,0), 6, 0, coords_tyr_ca,  [0.0]*3, True, 0), # CA (idx 5)
+        ((0,0,0,0), 6, 0, coords_tyr_c,   [0.0]*3, True, 0), # C  (idx 6)
+        ((0,0,0,0), 8, 0, coords_tyr_o,   [0.0]*3, True, 0), # O  (idx 7)
+        ((0,0,0,0), 6, 0, coords_tyr_cb,  [0.0]*3, True, 0), # CB (idx 8)
+        ((0,0,0,0), 6, 0, coords_tyr_cg,  [0.0]*3, True, 0), # CG (idx 9)
+        ((0,0,0,0), 6, 0, coords_tyr_cd1, [0.0]*3, True, 0), # CD1 (idx 10)
+        ((0,0,0,0), 6, 0, coords_tyr_ce1, [0.0]*3, True, 0), # CE1 (idx 11)
+        ((0,0,0,0), 6, 0, coords_tyr_cz,  [0.0]*3, True, 0), # CZ (idx 12)
+        ((0,0,0,0), 8, 0, coords_tyr_oh,  [0.0]*3, True, 0), # OH (idx 13)
+        ((0,0,0,0), 8, 0, coords_tyr_oxt, [0.0]*3, True, 0)  # OXT (idx 14)
     ]
 
-    mock_global_coords_data = [
+    mock_global_coords_data = [ # Should match mock_atoms_data order
         (coords_gly_n,), (coords_gly_ca,), (coords_gly_c,), (coords_gly_o,),
-        (coords_ala_n,), (coords_ala_ca,), (coords_ala_c,), (coords_ala_o,), (coords_ala_cb,),
-        (coords_ala_oxt,)
+        (coords_tyr_n,), (coords_tyr_ca,), (coords_tyr_c,), (coords_tyr_o,),
+        (coords_tyr_cb,), (coords_tyr_cg,), (coords_tyr_cd1,), (coords_tyr_ce1,),
+        (coords_tyr_cz,), (coords_tyr_oh,), (coords_tyr_oxt,)
     ]
 
     mock_data = {
         'atoms': np.array(mock_atoms_data, dtype=object),
-        'coords': np.array(mock_global_coords_data, dtype=object), # Kept for structural consistency with user NPZ
+        'coords': np.array(mock_global_coords_data, dtype=object),
         'residues': np.array([
-            # Indices used by write_temp_pdb_from_npz:
-            # [0]: res_name
-            # [2]: res_seq_num_in_chain_0idx (PDB sequence number will be this + 1)
-            # [3]: atom_start_global_idx (index in 'atoms' array)
-            # [4]: num_atoms_in_res_npz
-            # [7]: is_standard_residue (boolean)
             # (resname, type_idx_placeholder, res_seq_in_chain_0idx, atom_start_idx, num_atoms, placeholder1, placeholder2, is_standard_residue_flag)
             ('GLY', 0, 0, 0, 4, None, None, True), # GLY: res_seq_idx 0, atom_start 0, num_atoms 4, standard
-            ('ALA', 1, 1, 4, 6, None, None, True)  # ALA: res_seq_idx 1, atom_start 4, num_atoms 6 (N,CA,C,O,CB,OXT), standard
+            ('TYR', 1, 1, 4, 11, None, None, True) # TYR: res_seq_idx 1, atom_start 4, num_atoms 11, standard
         ], dtype=object),
         'chains': np.array([
             # Indices used by write_temp_pdb_from_npz:
@@ -169,24 +176,62 @@ class TestProcessNoesy(unittest.TestCase):
 
         # ALA atoms (N, CA, C, O, CB)
         ala_atoms_npz = [(0,7), (0,6), (0,6), (0,8), (0,6)] # N, CA, C, O, CB
-        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array(ala_atoms_npz[0]), "ALA", 0, ala_atoms_npz), " N  ")
-        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array(ala_atoms_npz[4]), "ALA", 4, ala_atoms_npz), " CB ")
+        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array(ala_atoms_npz[0]), "ALA", 0, ala_atoms_npz), " N  ") # From COMMON_RESIDUE_HEAVY_ATOM_ORDER via STANDARD_ATOM_NOMENCLATURE
+        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array(ala_atoms_npz[4]), "ALA", 4, ala_atoms_npz), " CB ") # From COMMON_RESIDUE_HEAVY_ATOM_ORDER via STANDARD_ATOM_NOMENCLATURE
+
+        # Test TYR using STANDARD_ATOM_NOMENCLATURE
+        # N, CA, C, O, CB, CG, CD1, CE1, CZ, OH
+        tyr_atoms_npz = [((0,0,0,0), 7), ((0,0,0,0), 6), ((0,0,0,0), 6), ((0,0,0,0), 8), ((0,0,0,0), 6),
+                         ((0,0,0,0), 6), ((0,0,0,0), 6), ((0,0,0,0), 6), ((0,0,0,0), 6), ((0,0,0,0), 8)]
+        expected_tyr_names = [" N  ", " CA ", " C  ", " O  ", " CB ", " CG  ", " CD1 ", " CE1 ", " CZ  ", " OH  "]
+        for i, (atom_entry_tuple, expected_name) in enumerate(zip(tyr_atoms_npz, expected_tyr_names)):
+            # Construct a minimal np.array like atom_npz_entry for the test
+            # The first element of atom_entry_tuple is dummy features, second is atomic_number
+            # map_atom_info_to_pdb_atom_name expects atom_npz_entry[1] to be atomic_number
+            # For this test, only atomic_number matters for STANDARD_ATOM_NOMENCLATURE path if heavy_atom_counter is right.
+            # The `all_atom_entries_for_this_residue` needs to be a list of items where item[1] is atomic_number.
+            mock_atom_npz_entry = np.array([0, atom_entry_tuple[1]], dtype=object) # Simplified entry for test
+
+            # Create a list of simplified entries for `all_atom_entries_for_this_residue`
+            # This list is used to calculate heavy_atom_counter_for_this_atom
+            mock_all_tyr_atoms_npz = [np.array([0, at[1]], dtype=object) for at in tyr_atoms_npz]
+
+            self.assertEqual(map_atom_info_to_pdb_atom_name(mock_atom_npz_entry, "TYR", i, mock_all_tyr_atoms_npz), expected_name)
+
+        # Test SER for OG
+        ser_atoms_npz = [((0,0,0,0), 7), ((0,0,0,0), 6), ((0,0,0,0), 6), ((0,0,0,0), 8), ((0,0,0,0), 6), ((0,0,0,0), 8)] # N,CA,C,O,CB,OG
+        mock_all_ser_atoms_npz = [np.array([0, at[1]], dtype=object) for at in ser_atoms_npz]
+        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array([0, ser_atoms_npz[5][1]]), "SER", 5, mock_all_ser_atoms_npz), " OG  ")
+
+
+        # Test fallback naming for a generic heavy atom beyond CB for an "UNK" residue
+        # UNK residue not in STANDARD_ATOM_NOMENCLATURE, so should use COMMON_RESIDUE_HEAVY_ATOM_ORDER then generic
+        unk_atoms_npz = [((0,0,0,0), 7), ((0,0,0,0), 6), ((0,0,0,0), 6), ((0,0,0,0), 8), ((0,0,0,0), 6), ((0,0,0,0), 16)] # N,CA,C,O,CB, S (Sulfur)
+        mock_all_unk_atoms_npz = [np.array([0, at[1]], dtype=object) for at in unk_atoms_npz]
+        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array([0, unk_atoms_npz[0][1]]), "UNK", 0, mock_all_unk_atoms_npz), " N  ") # Common
+        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array([0, unk_atoms_npz[4][1]]), "UNK", 4, mock_all_unk_atoms_npz), " CB ") # Common
+        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array([0, unk_atoms_npz[5][1]]), "UNK", 5, mock_all_unk_atoms_npz), " S1 ") # Generic fallback (S, 1st S)
+
 
         # Test fallback naming for a generic heavy atom beyond CB
         # Example: ARG with CD (atomic_num 6), assume it's the 5th heavy atom (index 4 if N,CA,C,O,CB were before)
         # Let's say it's the 6th heavy atom in the list (index 5 for heavy_atom_counter)
         # For this, we need to count heavy atoms in all_atom_entries_for_this_residue
         arg_atoms_npz = [(0,7)]*5 + [(0,6)] # 5 dummy heavy atoms, then a Carbon
-        # atom_idx_in_residue_npz = 5, heavy_atom_counter_for_this_atom = 5
-        # element_type_count for Carbon at this position would be 1
-        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array(arg_atoms_npz[5]), "ARG", 5, arg_atoms_npz), " C1 ")
+        # atom_idx_in_residue_npz = 5, heavy_atom_counter_for_this_atom = 5.
+        # ARG is in STANDARD_ATOM_NOMENCLATURE. Index 5 is CG.
+        # Previous test `arg_atoms_npz` was a list of tuples. New format for map_atom_info needs list of np.array like objects or careful mocking.
+        # For ARG CG (index 5):
+        arg_full_atoms_npz_tuples = [((0,0,0,0), 7), ((0,0,0,0), 6), ((0,0,0,0), 6), ((0,0,0,0), 8), ((0,0,0,0), 6), ((0,0,0,0), 6)] # N,CA,C,O,CB,CG
+        mock_all_arg_atoms_npz = [np.array([0, at[1]], dtype=object) for at in arg_full_atoms_npz_tuples]
+        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array([0, arg_full_atoms_npz_tuples[5][1]]), "ARG", 5, mock_all_arg_atoms_npz), " CG  ")
 
         # Test hydrogen naming (generic H + index)
         h_atom_npz = (0,1) # Hydrogen
-        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array(h_atom_npz), "ALA", 5, ala_atoms_npz + [h_atom_npz]), "H 6 ")
+        self.assertEqual(map_atom_info_to_pdb_atom_name(np.array(h_atom_npz), "ALA", 5, mock_all_arg_atoms_npz + [np.array([0,h_atom_npz[1]])]), "H 6 ") # Use ALA for H test, ensure all_atoms is list of arrays
 
-        # Test force_atom_name
-        dummy_atom_entry = np.array([(0,0,0,0), 6, 0, [0,0,0], [0,0,0], True, 0], dtype=object) # Dummy C atom
+        # Test force_atom_name (remains valid)
+        dummy_atom_entry = np.array([0, 6], dtype=object) # Simplified for test, only atomic_number at index 1 is used by current map_atom_info heuristic paths if not forcing
         dummy_res_name = "GLY"
         dummy_atom_idx = 0
         dummy_all_atoms = [dummy_atom_entry]
@@ -200,7 +245,7 @@ class TestProcessNoesy(unittest.TestCase):
 
 
     def test_write_temp_pdb_from_npz(self):
-        # mock_data has GLY (4 atoms) and ALA (now 6 atoms: N, CA, C, O, CB, OXT)
+        # mock_data has GLY (4 atoms) and TYR (now 11 atoms: N,CA,C,O,CB,CG,CD1,CE1,CZ,OH,OXT)
         mock_data = get_mock_npz_data()
 
         # Use io.StringIO to capture PDB output
@@ -211,8 +256,8 @@ class TestProcessNoesy(unittest.TestCase):
 
         pdb_content = pdb_output_io.getvalue().splitlines()
 
-        # Expected: 4 ATOM (GLY) + 6 ATOM (ALA) + 1 TER (after chain A) + 1 END = 12 lines
-        self.assertEqual(len(pdb_content), 12)
+        # Expected: 4 ATOM (GLY) + 11 ATOM (TYR) + 1 TER (after chain A) + 1 END = 17 lines
+        self.assertEqual(len(pdb_content), 17)
 
         # Check first atom (GLY, N)
         # ATOM      1  N   GLY A   1      1.000   2.000   3.000  1.00  0.00           N
@@ -229,41 +274,61 @@ class TestProcessNoesy(unittest.TestCase):
         self.assertEqual(pdb_content[0][76:78].strip(), "N")   # Element
 
         # Check last atom (ALA, CB)
-        # Atom serial 9 (4 for GLY + 5 for ALA)
-        # map_atom_info_to_pdb_atom_name for ALA CB (5th atom in its residue, 4th heavy atom index) gives " CB "
-        # ALA is res_entry[2]=1 (0-indexed seq num) -> PDB res_num 2
-        # It's the 9th atom overall (serial 9)
-        self.assertEqual(pdb_content[8][7:11].strip(), "9") # Atom serial for ALA CB
-        self.assertEqual(pdb_content[8][12:16], " CB ")     # Atom name for ALA CB, should be unaffected
-        self.assertEqual(pdb_content[8][17:20], "ALA")      # Residue name for ALA CB
-        self.assertEqual(pdb_content[8][21], "A")
-        self.assertEqual(pdb_content[8][22:26].strip(), "2") # Residue sequence number for ALA CB
-        self.assertAlmostEqual(float(pdb_content[8][38:46]), 3.400) # Y coord for ALA CB
-        self.assertEqual(pdb_content[8][76:78].strip(), "C")   # Element for ALA CB
+        # Check TYR atoms (starting from pdb_content[4], which is TYR N, atom serial 5)
+        # Expected TYR atom names (padded): N, CA, C, O, CB, CG, CD1, CE1, CZ, OH, OXT
+        # Based on _apply_pdb_atom_name_padding:
+        # N -> " N  ", CA -> " CA ", C -> " C  ", O -> " O  ", CB -> " CB "
+        # CG -> " CG  ", CD1 -> " CD1", CE1 -> " CE1", CZ -> " CZ  " (if name_stem is 2 chars like CG, CZ)
+        # OH -> " OH  "
+        # OXT -> " OXT"
+        # Let's re-check STANDARD_ATOM_NOMENCLATURE and padding:
+        # TYR: {..., 5:"CG", 6:"CD1", 7:"CE1", 8:"CZ", 9:"OH"}
+        # _apply_pdb_atom_name_padding: "CG" (len 2) -> " CG "; "CD1" (len 3) -> "CD1 "; "CE1" (len 3) -> "CE1 "; "CZ" (len 2) -> " CZ "; "OH" (len 2) -> " OH "
+        expected_tyr_atom_names_pdb = [" N  ", " CA ", " C  ", " O  ", " CB ", " CG  ", " CD1 ", " CE1 ", " CZ  ", " OH  ", " OXT"]
 
-        # Check ALA OXT (10th atom, index 9 in pdb_content)
-        # ATOM     10  OXT ALA A   2       2.500   3.500   4.500  1.00  0.00           O
-        self.assertTrue(pdb_content[9].startswith("ATOM "))
-        self.assertEqual(pdb_content[9][7:11].strip(), "10")      # Atom serial
-        self.assertEqual(pdb_content[9][12:16], " OXT")           # Atom name (forced and padded)
-        self.assertEqual(pdb_content[9][17:20], "ALA")            # Residue name
-        self.assertEqual(pdb_content[9][21], "A")                 # Chain ID
-        self.assertEqual(pdb_content[9][22:26].strip(), "2")      # Residue sequence number for ALA
-        self.assertAlmostEqual(float(pdb_content[9][30:38]), 2.500) # X coord of OXT
-        self.assertAlmostEqual(float(pdb_content[9][38:46]), 3.500) # Y coord of OXT
-        self.assertAlmostEqual(float(pdb_content[9][46:54]), 4.500) # Z coord of OXT
-        self.assertEqual(pdb_content[9][76:78].strip(), "O")      # Element
+        # Check TYR main carbonyl O (pdb_content[7], serial 8)
+        self.assertEqual(pdb_content[7][12:16], " O  ", "TYR main O name incorrect") # Forced by O/OXT logic
 
-        # Check TER record for Chain A (after 10 ATOM lines)
-        # TER    11      ALA A   2
-        self.assertTrue(pdb_content[10].startswith("TER  "))
-        self.assertEqual(pdb_content[10][6:11].strip(), "11") # TER serial (last atom serial + 1)
-        self.assertEqual(pdb_content[10][17:20], "ALA")       # Last residue name in chain
-        self.assertEqual(pdb_content[10][21], "A")            # Chain ID
-        self.assertEqual(pdb_content[10][22:26].strip(), "2") # Last residue sequence number
+        # Check TYR CB (pdb_content[8], serial 9)
+        self.assertEqual(pdb_content[8][12:16], " CB ", "TYR CB name incorrect")
+
+        # Check TYR CG (pdb_content[9], serial 10)
+        self.assertEqual(pdb_content[9][12:16], " CG  ", "TYR CG name incorrect") # Padding for 2-char "CG" is " CG  "
+
+        # Check TYR CD1 (pdb_content[10], serial 11)
+        self.assertEqual(pdb_content[10][12:16], " CD1 ", "TYR CD1 name incorrect") # Padding for 3-char "CD1" is "CD1 "
+
+        # Check TYR CE1 (pdb_content[11], serial 12)
+        self.assertEqual(pdb_content[11][12:16], " CE1 ", "TYR CE1 name incorrect") # Padding for 3-char "CE1" is "CE1 "
+
+        # Check TYR CZ (pdb_content[12], serial 13)
+        self.assertEqual(pdb_content[12][12:16], " CZ  ", "TYR CZ name incorrect") # Padding for 2-char "CZ" is " CZ  "
+
+        # Check TYR OH (side-chain hydroxyl, pdb_content[13], serial 14)
+        self.assertEqual(pdb_content[13][12:16], " OH  ", "TYR OH name incorrect") # map_atom_info should handle this
+        self.assertEqual(pdb_content[13][17:20], "TYR")
+        self.assertEqual(pdb_content[13][76:78].strip(), "O") # Element for OH
+
+        # Check TYR OXT (C-terminal, pdb_content[14], serial 15)
+        self.assertTrue(pdb_content[14].startswith("ATOM "))
+        self.assertEqual(pdb_content[14][7:11].strip(), "15")     # Atom serial
+        self.assertEqual(pdb_content[14][12:16], " OXT")          # Atom name (forced by O/OXT logic)
+        self.assertEqual(pdb_content[14][17:20], "TYR")           # Residue name
+        self.assertEqual(pdb_content[14][21], "A")                # Chain ID
+        self.assertEqual(pdb_content[14][22:26].strip(), "2")     # Residue sequence number for TYR
+        self.assertAlmostEqual(float(pdb_content[14][30:38]), 2.25) # X coord of OXT
+        self.assertEqual(pdb_content[14][76:78].strip(), "O")     # Element
+
+        # Check TER record for Chain A (after 15 ATOM lines)
+        # TER    16      TYR A   2
+        self.assertTrue(pdb_content[15].startswith("TER  "))
+        self.assertEqual(pdb_content[15][6:11].strip(), "16") # TER serial (last atom serial + 1)
+        self.assertEqual(pdb_content[15][17:20], "TYR")       # Last residue name in chain
+        self.assertEqual(pdb_content[15][21], "A")            # Chain ID
+        self.assertEqual(pdb_content[15][22:26].strip(), "2") # Last residue sequence number
 
         # Check END record (last line)
-        self.assertTrue(pdb_content[11].startswith("END"))
+        self.assertTrue(pdb_content[16].startswith("END"))
 
 
     # --- Tests for add_hydrogens (updated for new error handling and logging) ---
