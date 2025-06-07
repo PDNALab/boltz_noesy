@@ -178,139 +178,139 @@ def parse_npz(npz_file_path: str) -> dict:
         raise
 
 
-PDB_ATOM_NAME_FALLBACK_MAX_HEAVY = 5 # Number of initial heavy atoms to try mapping using simple order
-COMMON_RESIDUE_HEAVY_ATOM_ORDER = { # Simplified typical order for first few heavy atoms
-    0: 'N', 1: 'CA', 2: 'C', 3: 'O', 4: 'CB'
-}
-GLY_ATOM_ORDER = {0: 'N', 1: 'CA', 2: 'C', 3: 'O'} # Glycine lacks CB
+# PDB_ATOM_NAME_FALLBACK_MAX_HEAVY = 5 # Number of initial heavy atoms to try mapping using simple order
+# COMMON_RESIDUE_HEAVY_ATOM_ORDER = { # Simplified typical order for first few heavy atoms
+#     0: 'N', 1: 'CA', 2: 'C', 3: 'O', 4: 'CB'
+# }
+# GLY_ATOM_ORDER = {0: 'N', 1: 'CA', 2: 'C', 3: 'O'} # Glycine lacks CB
 
-# Helper function for PDB atom name padding
-def _apply_pdb_atom_name_padding(name_stem: str) -> str:
-    name_len = len(name_stem)
-    if name_len == 1:  # Typically N, C, O, S etc.
-        return f" {name_stem}  "
-    elif name_len == 2:  # Typically CA, CB, CG, CD etc.
-        return f" {name_stem} "
-    elif name_len == 3:  # e.g. OXT, CG1, HD2
-        if name_stem == "OXT": # Special case for OXT
-            return " OXT"
-        # For other 3-char names, PDB standard varies (e.g., " CG1", "NE2 ").
-        # Simple left-alignment is used here as a compromise.
-        else:
-            return f"{name_stem:<4}"[:4]
-    elif name_len == 4:  # e.g. HD21 (ASN)
-        return name_stem
-    else: # Too short (should not happen if stems are valid) or too long
-        return f"{name_stem:<4}"[:4] # Truncate or pad
-
-
-STANDARD_ATOM_NOMENCLATURE = {
-    "ALA": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB"},
-    "ARG": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD", 7:"NE", 8:"CZ", 9:"NH1", 10:"NH2"},
-    "ASN": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"OD1", 7:"ND2"},
-    "ASP": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"OD1", 7:"OD2"},
-    "CYS": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"SG"},
-    "GLN": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD", 7:"OE1", 8:"NE2"},
-    "GLU": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD", 7:"OE1", 8:"OE2"},
-    "GLY": {0:"N", 1:"CA", 2:"C", 3:"O"},
-    "HIS": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"ND1", 7:"CD2", 8:"CE1", 9:"NE2"}, # Order based on common tautomer
-    "ILE": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG1", 6:"CD1", 7:"CG2"}, # CD1 is on CG1; CG2 on CB
-    "LEU": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD1", 7:"CD2"},
-    "LYS": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD", 7:"CE", 8:"NZ"},
-    "MET": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"SD", 7:"CE"},
-    "PHE": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD1", 7:"CD2", 8:"CE1", 9:"CE2", 10:"CZ"},
-    "PRO": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD"},
-    "SER": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"OG"},
-    "THR": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"OG1", 6:"CG2"},
-    "TRP": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD1", 7:"NE1", 8:"CE2", 9:"CD2", 10:"CE3", 11:"CZ2", 12:"CZ3", 13:"CH2"}, # Order can be complex
-    "TYR": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD1", 7:"CD2", 8:"CE1", 9:"CE2", 10:"CZ", 11:"OH"},
-}
+# # Helper function for PDB atom name padding
+# def _apply_pdb_atom_name_padding(name_stem: str) -> str:
+#     name_len = len(name_stem)
+#     if name_len == 1:  # Typically N, C, O, S etc.
+#         return f" {name_stem}  "
+#     elif name_len == 2:  # Typically CA, CB, CG, CD etc.
+#         return f" {name_stem} "
+#     elif name_len == 3:  # e.g. OXT, CG1, HD2
+#         if name_stem == "OXT": # Special case for OXT
+#             return " OXT"
+#         # For other 3-char names, PDB standard varies (e.g., " CG1", "NE2 ").
+#         # Simple left-alignment is used here as a compromise.
+#         else:
+#             return f"{name_stem:<4}"[:4]
+#     elif name_len == 4:  # e.g. HD21 (ASN)
+#         return name_stem
+#     else: # Too short (should not happen if stems are valid) or too long
+#         return f"{name_stem:<4}"[:4] # Truncate or pad
 
 
-def map_atom_info_to_pdb_atom_name(atom_npz_entry: np.ndarray,
-                                   residue_name: str,
-                                   atom_idx_in_residue_npz: int,
-                                   all_atom_entries_for_this_residue: list,
-                                   force_atom_name: str = None) -> str:
-    """
-    Heuristically maps atom information from NPZ to a PDB atom name,
-    unless force_atom_name is provided. Uses standard nomenclature where possible.
-    This is a simplified heuristic and might need significant refinement for accuracy.
+# STANDARD_ATOM_NOMENCLATURE = {
+#     "ALA": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB"},
+#     "ARG": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD", 7:"NE", 8:"CZ", 9:"NH1", 10:"NH2"},
+#     "ASN": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"OD1", 7:"ND2"},
+#     "ASP": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"OD1", 7:"OD2"},
+#     "CYS": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"SG"},
+#     "GLN": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD", 7:"OE1", 8:"NE2"},
+#     "GLU": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD", 7:"OE1", 8:"OE2"},
+#     "GLY": {0:"N", 1:"CA", 2:"C", 3:"O"},
+#     "HIS": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"ND1", 7:"CD2", 8:"CE1", 9:"NE2"}, # Order based on common tautomer
+#     "ILE": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG1", 6:"CD1", 7:"CG2"}, # CD1 is on CG1; CG2 on CB
+#     "LEU": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD1", 7:"CD2"},
+#     "LYS": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD", 7:"CE", 8:"NZ"},
+#     "MET": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"SD", 7:"CE"},
+#     "PHE": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD1", 7:"CD2", 8:"CE1", 9:"CE2", 10:"CZ"},
+#     "PRO": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD"},
+#     "SER": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"OG"},
+#     "THR": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"OG1", 6:"CG2"},
+#     "TRP": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD1", 7:"NE1", 8:"CE2", 9:"CD2", 10:"CE3", 11:"CZ2", 12:"CZ3", 13:"CH2"}, # Order can be complex
+#     "TYR": {0:"N", 1:"CA", 2:"C", 3:"O", 4:"CB", 5:"CG", 6:"CD1", 7:"CD2", 8:"CE1", 9:"CE2", 10:"CZ", 11:"OH"},
+# }
 
-    Args:
-        atom_npz_entry: A single row from the NPZ 'atoms' array.
-                        Assumes atom_npz_entry[1] is atomic number.
-        residue_name (str): 3-letter code of the parent residue.
-        atom_idx_in_residue_npz (int): 0-based index of this atom within its residue's
-                                       list of atoms as read from NPZ 'atoms' array.
-        all_atom_entries_for_this_residue (list): List of all atom_npz_entry for the current residue.
-                                                  Used to count heavy atoms.
 
-    Returns:
-        str: A 4-character PDB atom name (e.g., " CA ", " CB ", " C1 ").
-    """
-    if force_atom_name:
-        return _apply_pdb_atom_name_padding(force_atom_name)
+# def map_atom_info_to_pdb_atom_name(atom_npz_entry: np.ndarray,
+#                                    residue_name: str,
+#                                    atom_idx_in_residue_npz: int,
+#                                    all_atom_entries_for_this_residue: list,
+#                                    force_atom_name: str = None) -> str:
+#     """
+#     Heuristically maps atom information from NPZ to a PDB atom name,
+#     unless force_atom_name is provided. Uses standard nomenclature where possible.
+#     This is a simplified heuristic and might need significant refinement for accuracy.
 
-    atomic_number = atom_npz_entry[1]
-    element_symbol = ATOMIC_NUMBER_TO_SYMBOL.get(atomic_number, "X").upper() # Default to X if unknown
+#     Args:
+#         atom_npz_entry: A single row from the NPZ 'atoms' array.
+#                         Assumes atom_npz_entry[1] is atomic number.
+#         residue_name (str): 3-letter code of the parent residue.
+#         atom_idx_in_residue_npz (int): 0-based index of this atom within its residue's
+#                                        list of atoms as read from NPZ 'atoms' array.
+#         all_atom_entries_for_this_residue (list): List of all atom_npz_entry for the current residue.
+#                                                   Used to count heavy atoms.
 
-    # Count how many heavy atoms appear before this one (or are this one) in the residue's NPZ list
-    heavy_atom_counter_for_this_atom = -1
-    current_atom_is_heavy = (atomic_number != 1) # Hydrogen is 1
+#     Returns:
+#         str: A 4-character PDB atom name (e.g., " CA ", " CB ", " C1 ").
+#     """
+#     if force_atom_name:
+#         return _apply_pdb_atom_name_padding(force_atom_name)
 
-    for i, atm_entry in enumerate(all_atom_entries_for_this_residue):
-        if atm_entry[1] != 1: # if it's a heavy atom
-            heavy_atom_counter_for_this_atom +=1
-        if i == atom_idx_in_residue_npz: # Found the current atom
-            break
+#     atomic_number = atom_npz_entry[1]
+#     element_symbol = ATOMIC_NUMBER_TO_SYMBOL.get(atomic_number, "X").upper() # Default to X if unknown
 
-    if not current_atom_is_heavy: # If it's a Hydrogen
-        # Basic hydrogen naming: H plus a number, or HN, HA etc. if logic was more complex
-        # PDB2PQR will rename these anyway. For now, generic.
-        # To make it somewhat unique for pdb2pqr, use its index within the residue.
-        # This formatting is specific and might not fit _apply_pdb_atom_name_padding well if name_stem is "H1", "H2" etc.
-        # Keeping its own formatting for now.
-        return f"{element_symbol:<2}{str(atom_idx_in_residue_npz + 1):<2}"[:4].ljust(4)
+#     # Count how many heavy atoms appear before this one (or are this one) in the residue's NPZ list
+#     heavy_atom_counter_for_this_atom = -1
+#     current_atom_is_heavy = (atomic_number != 1) # Hydrogen is 1
 
-    # --- Heavy Atom Naming ---
+#     for i, atm_entry in enumerate(all_atom_entries_for_this_residue):
+#         if atm_entry[1] != 1: # if it's a heavy atom
+#             heavy_atom_counter_for_this_atom +=1
+#         if i == atom_idx_in_residue_npz: # Found the current atom
+#             break
 
-    # 1. Try STANDARD_ATOM_NOMENCLATURE
-    if residue_name in STANDARD_ATOM_NOMENCLATURE:
-        atom_name_stem = STANDARD_ATOM_NOMENCLATURE[residue_name].get(heavy_atom_counter_for_this_atom)
-        if atom_name_stem:
-            return _apply_pdb_atom_name_padding(atom_name_stem)
+#     if not current_atom_is_heavy: # If it's a Hydrogen
+#         # Basic hydrogen naming: H plus a number, or HN, HA etc. if logic was more complex
+#         # PDB2PQR will rename these anyway. For now, generic.
+#         # To make it somewhat unique for pdb2pqr, use its index within the residue.
+#         # This formatting is specific and might not fit _apply_pdb_atom_name_padding well if name_stem is "H1", "H2" etc.
+#         # Keeping its own formatting for now.
+#         return f"{element_symbol:<2}{str(atom_idx_in_residue_npz + 1):<2}"[:4].ljust(4)
 
-    # 2. Fallback to COMMON_RESIDUE_HEAVY_ATOM_ORDER (N, CA, C, O, CB)
-    # This is useful for non-standard residues or if STANDARD_ATOM_NOMENCLATURE is incomplete.
-    atom_order_map = GLY_ATOM_ORDER if residue_name == "GLY" else COMMON_RESIDUE_HEAVY_ATOM_ORDER
-    if heavy_atom_counter_for_this_atom < PDB_ATOM_NAME_FALLBACK_MAX_HEAVY: # Max heavy is 5 (0-4)
-        pdb_name_stem = atom_order_map.get(heavy_atom_counter_for_this_atom)
-        if pdb_name_stem:
-            # The old logic had specific padding based on element symbol vs pdb_name_stem,
-            # e.g. for 'C' in CA vs 'O' in O. _apply_pdb_atom_name_padding is simpler.
-            return _apply_pdb_atom_name_padding(pdb_name_stem)
+#     # --- Heavy Atom Naming ---
 
-    # 3. Fallback: Generic element_symbol + count
-    # Use element symbol and a number based on its appearance order among heavy atoms in the residue
-    # e.g. C1, C2, N1 etc. This ensures uniqueness within the residue for PDB.
-    # PDB format: Element right justified if name is short (e.g. " C1 ", "S G ")
-    # Atom name: columns 13-16
-    # Element : columns 77-78
-    # For atom name, it's more like "CG1 ", "SD  "
-    # Let's try element + count relative to its element type in this residue
+#     # 1. Try STANDARD_ATOM_NOMENCLATURE
+#     if residue_name in STANDARD_ATOM_NOMENCLATURE:
+#         atom_name_stem = STANDARD_ATOM_NOMENCLATURE[residue_name].get(heavy_atom_counter_for_this_atom)
+#         if atom_name_stem:
+#             return _apply_pdb_atom_name_padding(atom_name_stem)
 
-    # Count occurrences of this element type up to this atom in the residue
-    element_type_count = 0
-    for i, atm_entry in enumerate(all_atom_entries_for_this_residue):
-        if atm_entry[1] == atomic_number: # Same element
-            element_type_count += 1
-        if i == atom_idx_in_residue_npz:
-            break
+#     # 2. Fallback to COMMON_RESIDUE_HEAVY_ATOM_ORDER (N, CA, C, O, CB)
+#     # This is useful for non-standard residues or if STANDARD_ATOM_NOMENCLATURE is incomplete.
+#     atom_order_map = GLY_ATOM_ORDER if residue_name == "GLY" else COMMON_RESIDUE_HEAVY_ATOM_ORDER
+#     if heavy_atom_counter_for_this_atom < PDB_ATOM_NAME_FALLBACK_MAX_HEAVY: # Max heavy is 5 (0-4)
+#         pdb_name_stem = atom_order_map.get(heavy_atom_counter_for_this_atom)
+#         if pdb_name_stem:
+#             # The old logic had specific padding based on element symbol vs pdb_name_stem,
+#             # e.g. for 'C' in CA vs 'O' in O. _apply_pdb_atom_name_padding is simpler.
+#             return _apply_pdb_atom_name_padding(pdb_name_stem)
 
-    # Name like "C1", "C2", "N1" etc.
-    name_stem = f"{element_symbol}{element_type_count}" # e.g. C1, C2, N1
-    return _apply_pdb_atom_name_padding(name_stem)
+#     # 3. Fallback: Generic element_symbol + count
+#     # Use element symbol and a number based on its appearance order among heavy atoms in the residue
+#     # e.g. C1, C2, N1 etc. This ensures uniqueness within the residue for PDB.
+#     # PDB format: Element right justified if name is short (e.g. " C1 ", "S G ")
+#     # Atom name: columns 13-16
+#     # Element : columns 77-78
+#     # For atom name, it's more like "CG1 ", "SD  "
+#     # Let's try element + count relative to its element type in this residue
+
+#     # Count occurrences of this element type up to this atom in the residue
+#     element_type_count = 0
+#     for i, atm_entry in enumerate(all_atom_entries_for_this_residue):
+#         if atm_entry[1] == atomic_number: # Same element
+#             element_type_count += 1
+#         if i == atom_idx_in_residue_npz:
+#             break
+
+#     # Name like "C1", "C2", "N1" etc.
+#     name_stem = f"{element_symbol}{element_type_count}" # e.g. C1, C2, N1
+#     return _apply_pdb_atom_name_padding(name_stem)
 
 
 def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
@@ -382,11 +382,10 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
 
                 all_atom_entries_for_this_residue_npz = atoms_data[atom_start_global_idx : atom_start_global_idx + num_atoms_in_res_npz]
 
-                carbonyl_o_assigned_in_residue = False # For OXT logic
-                is_c_terminal_residue = (res_offset_in_chain == num_residues_in_chain - 1)
-                # is_standard_residue is already defined above as: is_standard_residue = bool(res_entry_original[7])
-                # Let's rename it for clarity in O/OXT logic if needed, or just use is_standard_residue
-                is_standard_protein_residue = is_standard_residue # Use this for clarity in the O/OXT logic
+                # carbonyl_o_assigned_in_residue = False # Removed for OXT logic reversion
+                # is_c_terminal_residue = (res_offset_in_chain == num_residues_in_chain - 1) # Keep, general property
+                # is_standard_protein_residue = is_standard_residue # Keep, general property (alias for is_standard_residue)
+
 
                 # Iterate through atoms in this residue
                 print(f"DEBUG:   Residue {res_name}{res_seq_num_for_pdb} (Chain {chain_pdb_id}) - num_atoms_in_res_npz: {num_atoms_in_res_npz}", flush=True)
@@ -414,62 +413,18 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
 
                     x, y, z = coord_list_from_atom_entry[0], coord_list_from_atom_entry[1], coord_list_from_atom_entry[2]
 
-                    # Use decode_atom_name_from_4i1 instead of map_atom_info_to_pdb_atom_name
-                    if len(atom_npz_entry_original) == 0 or not hasattr(atom_npz_entry_original[0], '__iter__'):
-                        # This check might need adjustment if atom_npz_entry_original[0] (encoded_name_field)
-                        # is no longer the primary source for atom naming and map_atom_info_to_pdb_atom_name
-                        # relies on other fields that are already validated (e.g. atomic_number at index 1).
-                        # For now, keeping it as it might still be relevant for some NPZ structures or debugging.
-                        logger.warning(f"Atom {global_atom_idx_for_atoms_array} in file {npz_data.get('id', 'UNKNOWN_FILE')} has potentially problematic encoded name field (atom_npz_entry_original[0]): {atom_npz_entry_original[0]!r}.")
-                        # If map_atom_info_to_pdb_atom_name does not use atom_npz_entry_original[0], this warning's condition might be re-evaluated.
-                        # No 'continue' here for now, let map_atom_info_to_pdb_atom_name attempt naming.
+                    # Reverted atom naming to use decode_atom_name_from_4i1
+                    # Ensure atom_npz_entry_original[0] (encoded_name_field) is valid before decoding
+                    # Assuming atom_npz_entry_original[0] is a numpy array like np.dtype("4i1")
+                    if not hasattr(atom_npz_entry_original[0], '__iter__') or not atom_npz_entry_original[0].any():
+                        logger.warning(f"Atom {global_atom_idx_for_atoms_array} in file {npz_data.get('id', 'UNKNOWN_FILE')} has invalid or empty encoded name field: {atom_npz_entry_original[0]!r}. Using fallback 'UNK'.")
+                        atom_name_pdb = "UNK " # Default UNK with PDB padding for 3 chars + space
+                    else:
+                        encoded_name_field = atom_npz_entry_original[0]
+                        atom_name_pdb = decode_atom_name_from_4i1(encoded_name_field)
 
-                    # encoded_name_field = atom_npz_entry_original[0] # No longer directly used for atom_name_pdb
-                    current_atomic_number = atom_npz_entry_original[1] # Assuming index 1 is atomic_number
-
-                    # Initial atom naming call (no forcing yet)
-                    atom_name_pdb = map_atom_info_to_pdb_atom_name(
-                        atom_npz_entry_original,
-                        res_name,
-                        atom_offset_in_residue,
-                        all_atom_entries_for_this_residue_npz,
-                        force_atom_name=None
-                    )
-
-                    # Refined O/OXT logic for standard protein oxygens
-                    if current_atomic_number == 8 and is_standard_protein_residue:
-                        # Calculate this oxygen's 0-indexed count among HEAVY atoms in its residue
-                        current_heavy_atom_idx_among_heavy = -1
-                        temp_heavy_atom_count = 0
-                        for k_idx_loop in range(atom_offset_in_residue + 1): # Iterate up to and including the current atom
-                            if all_atom_entries_for_this_residue_npz[k_idx_loop][1] != 1: # If the atom at k_idx_loop is heavy
-                                if k_idx_loop == atom_offset_in_residue: # Current atom is this heavy atom
-                                    current_heavy_atom_idx_among_heavy = temp_heavy_atom_count
-                                temp_heavy_atom_count += 1
-
-                        if current_heavy_atom_idx_among_heavy == 3: # Standard position for main carbonyl 'O'
-                            atom_name_pdb = _apply_pdb_atom_name_padding("O")
-                            # carbonyl_o_assigned_in_residue will be updated below by the generic check
-
-                        elif is_c_terminal_residue and carbonyl_o_assigned_in_residue:
-                            # This oxygen is in a C-terminal residue, and main 'O' has already been assigned.
-                            # If the initial `atom_name_pdb` (from heuristic call) is generic, assume OXT.
-                            # STANDARD_ATOM_NOMENCLATURE in map_atom_info should handle specific side-chain oxygens.
-                            # Generic oxygen names from map_atom_info's fallback are like " O1  ", " O2  ".
-                            is_generic_fallback_oxygen_name = False
-                            stripped_name = atom_name_pdb.strip()
-                            if stripped_name.startswith("O") and len(stripped_name) > 1 and stripped_name[1:].isdigit():
-                                is_generic_fallback_oxygen_name = True
-
-                            if is_generic_fallback_oxygen_name:
-                                atom_name_pdb = _apply_pdb_atom_name_padding("OXT")
-
-                    # General update for carbonyl_o_assigned_in_residue flag,
-                    # MUST be after O/OXT overrides are applied to atom_name_pdb.
-                    if atom_name_pdb == _apply_pdb_atom_name_padding("O"):
-                        carbonyl_o_assigned_in_residue = True
-
-                    element_symbol = ATOMIC_NUMBER_TO_SYMBOL.get(current_atomic_number, 'X').rjust(2) # Right justify for PDB
+                    current_atomic_number = atom_npz_entry_original[1] # Still needed for element symbol
+                    element_symbol = ATOMIC_NUMBER_TO_SYMBOL.get(current_atomic_number, 'X').rjust(2)
 
                     atom_serial += 1
                     chain_processed_atom_count += 1 # Increment per-chain atom counter
