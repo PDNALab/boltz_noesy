@@ -20,6 +20,7 @@ from scripts.process.process_noesy import (
     parse_npz, # New function to test
     map_atom_info_to_pdb_atom_name, # New function to test
     write_temp_pdb_from_npz, # New function to test
+    # decode_atom_name_from_4i1, # No longer used directly in tests or by the modified code path
     RELEVANT_ATOMS,
     BACKBONE_AMIDE,
     PDB2PQR_PATH,
@@ -70,13 +71,24 @@ def get_mock_npz_data():
         'atoms': np.array(mock_atoms_data, dtype=object),
         'coords': np.array(mock_global_coords_data, dtype=object), # Kept for structural consistency with user NPZ
         'residues': np.array([
-            # (resname, type_idx, chain_idx_in_chains, res_seq_in_chain_0idx, atom_start_idx, num_atoms_in_res)
-            ('GLY', 0, 0, 0, 0, 4), # 4 atoms for GLY
-            ('ALA', 1, 0, 1, 4, 5)  # 5 atoms for ALA, starting at global index 4
+            # Indices used by write_temp_pdb_from_npz:
+            # [0]: res_name
+            # [2]: res_seq_num_in_chain_0idx (PDB sequence number will be this + 1)
+            # [3]: atom_start_global_idx (index in 'atoms' array)
+            # [4]: num_atoms_in_res_npz
+            # [7]: is_standard_residue (boolean)
+            # (resname, type_idx_placeholder, res_seq_in_chain_0idx, atom_start_idx, num_atoms, placeholder1, placeholder2, is_standard_residue_flag)
+            ('GLY', 0, 0, 0, 4, None, None, True), # GLY: res_seq_idx 0, atom_start 0, num_atoms 4, standard
+            ('ALA', 1, 1, 4, 5, None, None, True)  # ALA: res_seq_idx 1, atom_start 4, num_atoms 5, standard
         ], dtype=object),
         'chains': np.array([
-            ('A',), # Chain ID for chain_idx_in_chains = 0
-            ('B',)  # Chain ID for chain_idx_in_chains = 1 (if used)
+            # Indices used by write_temp_pdb_from_npz:
+            # [0]: chain_id_str
+            # [7]: res_start_idx_in_residues_array (index in 'residues' array)
+            # [8]: num_residues_in_chain
+            # (chain_id_str, p1, p2, p3, p4, p5, p6, res_start_idx_in_residues_array, num_residues_in_chain)
+            ('A', None, None, None, None, None, None, 0, 2), # Chain 'A', starts at res_idx 0, has 2 residues (GLY, ALA)
+            # ('B', None, None, None, None, None, None, 2, 0)  # Example if there was another chain starting after ALA
         ], dtype=object)
     }
     return mock_data
@@ -182,7 +194,8 @@ class TestProcessNoesy(unittest.TestCase):
 
         pdb_content = pdb_output_io.getvalue().splitlines()
 
-        self.assertEqual(len(pdb_content), 9) # 4 atoms for GLY + 5 for ALA
+        # Expected: 4 ATOM (GLY) + 5 ATOM (ALA) + 1 TER (after chain A) + 1 END = 11 lines
+        self.assertEqual(len(pdb_content), 11)
 
         # Check first atom (GLY, N)
         # ATOM      1  N   GLY A   1      1.000   2.000   3.000  1.00  0.00           N
@@ -200,15 +213,27 @@ class TestProcessNoesy(unittest.TestCase):
 
         # Check last atom (ALA, CB)
         # Atom serial 9 (4 for GLY + 5 for ALA)
-        # map_atom_info_to_pdb_atom_name for ALA CB (5th atom, 4th heavy index) gives " CB "
-        # ALA is res_entry[3]=1 -> PDB res_num 2
-        self.assertEqual(pdb_content[8][7:11].strip(), "9")
-        self.assertEqual(pdb_content[8][12:16], " CB ")
-        self.assertEqual(pdb_content[8][17:20], "ALA")
+        # map_atom_info_to_pdb_atom_name for ALA CB (5th atom in its residue, 4th heavy atom index) gives " CB "
+        # ALA is res_entry[2]=1 (0-indexed seq num) -> PDB res_num 2
+        # It's the 9th atom overall (serial 9)
+        self.assertEqual(pdb_content[8][7:11].strip(), "9") # Atom serial for ALA CB
+        self.assertEqual(pdb_content[8][12:16], " CB ")     # Atom name for ALA CB
+        self.assertEqual(pdb_content[8][17:20], "ALA")      # Residue name for ALA CB
         self.assertEqual(pdb_content[8][21], "A")
-        self.assertEqual(pdb_content[8][22:26].strip(), "2")
+        self.assertEqual(pdb_content[8][22:26].strip(), "2") # Residue sequence number for ALA CB
         self.assertAlmostEqual(float(pdb_content[8][38:46]), 3.400) # Y coord for ALA CB
-        self.assertEqual(pdb_content[8][76:78].strip(), "C")
+        self.assertEqual(pdb_content[8][76:78].strip(), "C")   # Element for ALA CB
+
+        # Check TER record for Chain A (after 9 ATOM lines)
+        # TER    10      ALA A   2
+        self.assertTrue(pdb_content[9].startswith("TER  "))
+        self.assertEqual(pdb_content[9][6:11].strip(), "10") # TER serial (last atom serial + 1)
+        self.assertEqual(pdb_content[9][17:20], "ALA")       # Last residue name in chain
+        self.assertEqual(pdb_content[9][21], "A")            # Chain ID
+        self.assertEqual(pdb_content[9][22:26].strip(), "2") # Last residue sequence number
+
+        # Check END record (last line)
+        self.assertTrue(pdb_content[10].startswith("END"))
 
 
     # --- Tests for add_hydrogens (updated for new error handling and logging) ---

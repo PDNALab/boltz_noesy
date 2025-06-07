@@ -373,10 +373,16 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
 
                     # Use decode_atom_name_from_4i1 instead of map_atom_info_to_pdb_atom_name
                     if len(atom_npz_entry_original) == 0 or not hasattr(atom_npz_entry_original[0], '__iter__'):
-                        logger.warning(f"Atom {global_atom_idx_for_atoms_array} in file {npz_data.get('id', 'UNKNOWN_FILE')} has invalid encoded name field: {atom_npz_entry_original[0]!r}. Skipping ATOM.")
-                        continue
-                    encoded_name_field = atom_npz_entry_original[0]
-                    atom_name_pdb = decode_atom_name_from_4i1(encoded_name_field)
+                        # This check might need adjustment if atom_npz_entry_original[0] (encoded_name_field)
+                        # is no longer the primary source for atom naming and map_atom_info_to_pdb_atom_name
+                        # relies on other fields that are already validated (e.g. atomic_number at index 1).
+                        # For now, keeping it as it might still be relevant for some NPZ structures or debugging.
+                        logger.warning(f"Atom {global_atom_idx_for_atoms_array} in file {npz_data.get('id', 'UNKNOWN_FILE')} has potentially problematic encoded name field (atom_npz_entry_original[0]): {atom_npz_entry_original[0]!r}.")
+                        # If map_atom_info_to_pdb_atom_name does not use atom_npz_entry_original[0], this warning's condition might be re-evaluated.
+                        # No 'continue' here for now, let map_atom_info_to_pdb_atom_name attempt naming.
+
+                    # encoded_name_field = atom_npz_entry_original[0] # No longer directly used for atom_name_pdb
+                    atom_name_pdb = map_atom_info_to_pdb_atom_name(atom_npz_entry_original, res_name, atom_offset_in_residue, all_atom_entries_for_this_residue_npz)
 
                     # Ensure atomic_number is accessible and valid
                     if len(atom_npz_entry_original) < 2 : # Should have been caught by len < 4 if coords are at [3]
