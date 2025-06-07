@@ -187,9 +187,11 @@ GLY_ATOM_ORDER = {0: 'N', 1: 'CA', 2: 'C', 3: 'O'} # Glycine lacks CB
 def map_atom_info_to_pdb_atom_name(atom_npz_entry: np.ndarray,
                                    residue_name: str,
                                    atom_idx_in_residue_npz: int,
-                                   all_atom_entries_for_this_residue: list) -> str:
+                                   all_atom_entries_for_this_residue: list,
+                                   force_atom_name: str = None) -> str:
     """
-    Heuristically maps atom information from NPZ to a PDB atom name.
+    Heuristically maps atom information from NPZ to a PDB atom name,
+    unless force_atom_name is provided.
     This is a simplified heuristic and might need significant refinement for accuracy.
 
     Args:
@@ -204,6 +206,35 @@ def map_atom_info_to_pdb_atom_name(atom_npz_entry: np.ndarray,
     Returns:
         str: A 4-character PDB atom name (e.g., " CA ", " CB ", " C1 ").
     """
+    if force_atom_name:
+        # PDB atom names are 4 characters.
+        # Element symbol usually right-justified in a 2-char field if name is short (e.g., " CA ", " O  ").
+        # Atom name: columns 13-16
+        # Element : columns 77-78
+        # For atom name field (4 chars):
+        #   - 1 char (e.g., N, C, O): " N  " (space, char, 2 spaces)
+        #   - 2 chars (e.g., CA, CB, SD): " CA " (space, 2 chars, space)
+        #   - 3 chars (e.g., OXT, CG1, HD2): "OXT " or "CG1 " or "HD2 " (name, space if 3 chars) - check standard, sometimes " OXT"
+        #     Let's go with left-alignment for 3 and 4 characters for simplicity unless it's a single element.
+        #     PDB standard for OXT is " OXT" (space, O, X, T). For CG1 it's "CG1 ".
+        #     This padding is tricky. Let's do a simplified version first and refine if needed.
+        #     A common library like BioPython would handle this best.
+
+        name_len = len(force_atom_name)
+        if name_len == 1: # Typically N, C, O, S etc.
+            return f" {force_atom_name}  "
+        elif name_len == 2: # Typically CA, CB, CG, CD etc.
+            return f" {force_atom_name} "
+        elif name_len == 3: # e.g. OXT, CG1, HD2. PDB spec: OXT is " OXT". Others like "CG1 ".
+            if force_atom_name == "OXT":
+                return " OXT"
+            else: # e.g. CG1, HD2
+                return f"{force_atom_name:<4}"[:4] # Pad with space to the right, e.g. "CG1 "
+        elif name_len == 4: # e.g. HD21 (ASN)
+            return force_atom_name
+        else: # Should not happen for standard names, or if it does, truncate/pad.
+            return f"{force_atom_name:<4}"[:4] # Truncate or pad to 4 chars, left-aligned
+
     atomic_number = atom_npz_entry[1]
     element_symbol = ATOMIC_NUMBER_TO_SYMBOL.get(atomic_number, "X").upper() # Default to X if unknown
 
@@ -345,6 +376,12 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
 
                 all_atom_entries_for_this_residue_npz = atoms_data[atom_start_global_idx : atom_start_global_idx + num_atoms_in_res_npz]
 
+                carbonyl_o_assigned_in_residue = False # For OXT logic
+                is_c_terminal_residue = (res_offset_in_chain == num_residues_in_chain - 1)
+                # is_standard_residue is already defined above as: is_standard_residue = bool(res_entry_original[7])
+                # Let's rename it for clarity in O/OXT logic if needed, or just use is_standard_residue
+                is_standard_protein_residue = is_standard_residue # Use this for clarity in the O/OXT logic
+
                 # Iterate through atoms in this residue
                 print(f"DEBUG:   Residue {res_name}{res_seq_num_for_pdb} (Chain {chain_pdb_id}) - num_atoms_in_res_npz: {num_atoms_in_res_npz}", flush=True)
                 for atom_offset_in_residue in range(num_atoms_in_res_npz):
@@ -382,14 +419,47 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
                         # No 'continue' here for now, let map_atom_info_to_pdb_atom_name attempt naming.
 
                     # encoded_name_field = atom_npz_entry_original[0] # No longer directly used for atom_name_pdb
-                    atom_name_pdb = map_atom_info_to_pdb_atom_name(atom_npz_entry_original, res_name, atom_offset_in_residue, all_atom_entries_for_this_residue_npz)
 
-                    # Ensure atomic_number is accessible and valid
-                    if len(atom_npz_entry_original) < 2 : # Should have been caught by len < 4 if coords are at [3]
-                         logger.warning(f"Atom entry {global_atom_idx_for_atoms_array} missing atomic number field. Skipping.")
-                         continue
-                    atomic_number = atom_npz_entry_original[1]
-                    element_symbol = ATOMIC_NUMBER_TO_SYMBOL.get(atomic_number, 'X').rjust(2) # Right justify for PDB
+                    forced_name_for_current_atom = None
+                    # atom_npz_entry_original is already defined
+                    current_atomic_number = atom_npz_entry_original[1] # Assuming index 1 is atomic_number
+
+                    if current_atomic_number == 8: # If it's an Oxygen
+                        if is_standard_protein_residue:
+                            num_heavy_atoms_before_this_one_in_res = 0
+                            for k_idx in range(atom_offset_in_residue):
+                                # Assuming atom_npz_entry[1] is atomic number
+                                if all_atom_entries_for_this_residue_npz[k_idx][1] != 1: # if heavy
+                                    num_heavy_atoms_before_this_one_in_res += 1
+
+                            current_atom_heavy_idx = num_heavy_atoms_before_this_one_in_res
+
+                            if current_atom_heavy_idx == 3: # Standard backbone carbonyl 'O' (0:N, 1:CA, 2:C, 3:O)
+                                forced_name_for_current_atom = "O"
+                                carbonyl_o_assigned_in_residue = True
+                            elif is_c_terminal_residue and carbonyl_o_assigned_in_residue:
+                                # If 'O' has been named, and this is a C-terminal residue,
+                                # this additional oxygen is likely OXT.
+                                # This assumes OXT appears after O in NPZ for the same residue.
+                                forced_name_for_current_atom = "OXT"
+                                # No need to set carbonyl_o_assigned_in_residue = True again, OXT is not the primary O
+
+                    atom_name_pdb = map_atom_info_to_pdb_atom_name(
+                        atom_npz_entry_original,
+                        res_name,
+                        atom_offset_in_residue,
+                        all_atom_entries_for_this_residue_npz,
+                        force_atom_name=forced_name_for_current_atom
+                    )
+
+                    # Update carbonyl_o_assigned_in_residue if the name resolved to " O  "
+                    # This handles cases where it was named by heuristic or if forced_name was "O"
+                    if atom_name_pdb == " O  ":
+                        carbonyl_o_assigned_in_residue = True
+
+                    # Ensure atomic_number is accessible and valid (already got current_atomic_number)
+                    # atomic_number = atom_npz_entry_original[1] # This is current_atomic_number
+                    element_symbol = ATOMIC_NUMBER_TO_SYMBOL.get(current_atomic_number, 'X').rjust(2) # Right justify for PDB
 
                     atom_serial += 1
                     chain_processed_atom_count += 1 # Increment per-chain atom counter

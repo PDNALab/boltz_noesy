@@ -46,6 +46,7 @@ def get_mock_npz_data():
     coords_ala_c   = [2.2, 3.2, 4.2]
     coords_ala_o   = [2.3, 3.3, 4.3]
     coords_ala_cb  = [2.4, 3.4, 4.4]
+    coords_ala_oxt = [2.5, 3.5, 4.5] # For C-terminal ALA OXT
 
     mock_atoms_data = [
         # Res1: GLY (N, CA, C, O) - 4 atoms
@@ -59,12 +60,14 @@ def get_mock_npz_data():
         ((46,0,0,0), 6, 0, coords_ala_ca, [0.0]*3, True, 0), # CA
         ((46,0,0,0), 6, 0, coords_ala_c,  [0.0]*3, True, 0), # C
         ((46,0,0,0), 8, 0, coords_ala_o,  [0.0]*3, True, 0), # O
-        ((46,0,0,0), 6, 0, coords_ala_cb, [0.0]*3, True, 0)  # CB
+        ((46,0,0,0), 6, 0, coords_ala_cb, [0.0]*3, True, 0), # CB
+        ((46,0,0,0), 8, 0, coords_ala_oxt, [0.0]*3, True, 0) # OXT for ALA (atomic_num 8)
     ]
 
     mock_global_coords_data = [
         (coords_gly_n,), (coords_gly_ca,), (coords_gly_c,), (coords_gly_o,),
-        (coords_ala_n,), (coords_ala_ca,), (coords_ala_c,), (coords_ala_o,), (coords_ala_cb,)
+        (coords_ala_n,), (coords_ala_ca,), (coords_ala_c,), (coords_ala_o,), (coords_ala_cb,),
+        (coords_ala_oxt,)
     ]
 
     mock_data = {
@@ -79,7 +82,7 @@ def get_mock_npz_data():
             # [7]: is_standard_residue (boolean)
             # (resname, type_idx_placeholder, res_seq_in_chain_0idx, atom_start_idx, num_atoms, placeholder1, placeholder2, is_standard_residue_flag)
             ('GLY', 0, 0, 0, 4, None, None, True), # GLY: res_seq_idx 0, atom_start 0, num_atoms 4, standard
-            ('ALA', 1, 1, 4, 5, None, None, True)  # ALA: res_seq_idx 1, atom_start 4, num_atoms 5, standard
+            ('ALA', 1, 1, 4, 6, None, None, True)  # ALA: res_seq_idx 1, atom_start 4, num_atoms 6 (N,CA,C,O,CB,OXT), standard
         ], dtype=object),
         'chains': np.array([
             # Indices used by write_temp_pdb_from_npz:
@@ -182,9 +185,23 @@ class TestProcessNoesy(unittest.TestCase):
         h_atom_npz = (0,1) # Hydrogen
         self.assertEqual(map_atom_info_to_pdb_atom_name(np.array(h_atom_npz), "ALA", 5, ala_atoms_npz + [h_atom_npz]), "H 6 ")
 
+        # Test force_atom_name
+        dummy_atom_entry = np.array([(0,0,0,0), 6, 0, [0,0,0], [0,0,0], True, 0], dtype=object) # Dummy C atom
+        dummy_res_name = "GLY"
+        dummy_atom_idx = 0
+        dummy_all_atoms = [dummy_atom_entry]
+
+        self.assertEqual(map_atom_info_to_pdb_atom_name(dummy_atom_entry, dummy_res_name, dummy_atom_idx, dummy_all_atoms, force_atom_name="N"), " N  ")
+        self.assertEqual(map_atom_info_to_pdb_atom_name(dummy_atom_entry, dummy_res_name, dummy_atom_idx, dummy_all_atoms, force_atom_name="CA"), " CA ")
+        self.assertEqual(map_atom_info_to_pdb_atom_name(dummy_atom_entry, dummy_res_name, dummy_atom_idx, dummy_all_atoms, force_atom_name="OXT"), " OXT")
+        self.assertEqual(map_atom_info_to_pdb_atom_name(dummy_atom_entry, dummy_res_name, dummy_atom_idx, dummy_all_atoms, force_atom_name="CG1"), "CG1 ")
+        self.assertEqual(map_atom_info_to_pdb_atom_name(dummy_atom_entry, dummy_res_name, dummy_atom_idx, dummy_all_atoms, force_atom_name="HD21"), "HD21")
+        self.assertEqual(map_atom_info_to_pdb_atom_name(dummy_atom_entry, dummy_res_name, dummy_atom_idx, dummy_all_atoms, force_atom_name="TOOLONG"), "TOOL")
+
 
     def test_write_temp_pdb_from_npz(self):
-        mock_data = get_mock_npz_data() # 2 residues, GLY (4 atoms), ALA (5 atoms)
+        # mock_data has GLY (4 atoms) and ALA (now 6 atoms: N, CA, C, O, CB, OXT)
+        mock_data = get_mock_npz_data()
 
         # Use io.StringIO to capture PDB output
         pdb_output_io = io.StringIO()
@@ -194,8 +211,8 @@ class TestProcessNoesy(unittest.TestCase):
 
         pdb_content = pdb_output_io.getvalue().splitlines()
 
-        # Expected: 4 ATOM (GLY) + 5 ATOM (ALA) + 1 TER (after chain A) + 1 END = 11 lines
-        self.assertEqual(len(pdb_content), 11)
+        # Expected: 4 ATOM (GLY) + 6 ATOM (ALA) + 1 TER (after chain A) + 1 END = 12 lines
+        self.assertEqual(len(pdb_content), 12)
 
         # Check first atom (GLY, N)
         # ATOM      1  N   GLY A   1      1.000   2.000   3.000  1.00  0.00           N
@@ -217,23 +234,36 @@ class TestProcessNoesy(unittest.TestCase):
         # ALA is res_entry[2]=1 (0-indexed seq num) -> PDB res_num 2
         # It's the 9th atom overall (serial 9)
         self.assertEqual(pdb_content[8][7:11].strip(), "9") # Atom serial for ALA CB
-        self.assertEqual(pdb_content[8][12:16], " CB ")     # Atom name for ALA CB
+        self.assertEqual(pdb_content[8][12:16], " CB ")     # Atom name for ALA CB, should be unaffected
         self.assertEqual(pdb_content[8][17:20], "ALA")      # Residue name for ALA CB
         self.assertEqual(pdb_content[8][21], "A")
         self.assertEqual(pdb_content[8][22:26].strip(), "2") # Residue sequence number for ALA CB
         self.assertAlmostEqual(float(pdb_content[8][38:46]), 3.400) # Y coord for ALA CB
         self.assertEqual(pdb_content[8][76:78].strip(), "C")   # Element for ALA CB
 
-        # Check TER record for Chain A (after 9 ATOM lines)
-        # TER    10      ALA A   2
-        self.assertTrue(pdb_content[9].startswith("TER  "))
-        self.assertEqual(pdb_content[9][6:11].strip(), "10") # TER serial (last atom serial + 1)
-        self.assertEqual(pdb_content[9][17:20], "ALA")       # Last residue name in chain
-        self.assertEqual(pdb_content[9][21], "A")            # Chain ID
-        self.assertEqual(pdb_content[9][22:26].strip(), "2") # Last residue sequence number
+        # Check ALA OXT (10th atom, index 9 in pdb_content)
+        # ATOM     10  OXT ALA A   2       2.500   3.500   4.500  1.00  0.00           O
+        self.assertTrue(pdb_content[9].startswith("ATOM "))
+        self.assertEqual(pdb_content[9][7:11].strip(), "10")      # Atom serial
+        self.assertEqual(pdb_content[9][12:16], " OXT")           # Atom name (forced and padded)
+        self.assertEqual(pdb_content[9][17:20], "ALA")            # Residue name
+        self.assertEqual(pdb_content[9][21], "A")                 # Chain ID
+        self.assertEqual(pdb_content[9][22:26].strip(), "2")      # Residue sequence number for ALA
+        self.assertAlmostEqual(float(pdb_content[9][30:38]), 2.500) # X coord of OXT
+        self.assertAlmostEqual(float(pdb_content[9][38:46]), 3.500) # Y coord of OXT
+        self.assertAlmostEqual(float(pdb_content[9][46:54]), 4.500) # Z coord of OXT
+        self.assertEqual(pdb_content[9][76:78].strip(), "O")      # Element
+
+        # Check TER record for Chain A (after 10 ATOM lines)
+        # TER    11      ALA A   2
+        self.assertTrue(pdb_content[10].startswith("TER  "))
+        self.assertEqual(pdb_content[10][6:11].strip(), "11") # TER serial (last atom serial + 1)
+        self.assertEqual(pdb_content[10][17:20], "ALA")       # Last residue name in chain
+        self.assertEqual(pdb_content[10][21], "A")            # Chain ID
+        self.assertEqual(pdb_content[10][22:26].strip(), "2") # Last residue sequence number
 
         # Check END record (last line)
-        self.assertTrue(pdb_content[10].startswith("END"))
+        self.assertTrue(pdb_content[11].startswith("END"))
 
 
     # --- Tests for add_hydrogens (updated for new error handling and logging) ---
