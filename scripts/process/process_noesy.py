@@ -376,15 +376,22 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
                 atom_start_global_idx = int(res_entry_original[3])
                 num_atoms_in_res_npz = int(res_entry_original[4])
                 is_standard_residue = bool(res_entry_original[7])
-                record_type = "ATOM  " if is_standard_residue else "HETATM"
+
+                if not is_standard_residue:
+                    # If the residue is not standard (e.g. HETATM, ligand, water),
+                    # skip to the next residue. This prevents its atoms from being written.
+                    logger.info(f"Skipping non-standard residue: {res_name}{res_seq_num_for_pdb} (Chain {chain_pdb_id}) as it is flagged as non-standard.")
+                    continue
+
+                record_type = "ATOM  " # Since only standard residues are processed, record type is always ATOM.
 
                 # print(f"DEBUG:   Residue: {res_name}{res_seq_num_for_pdb} (Chain {chain_pdb_id}), NPZ res_glbl_idx: {res_idx_global_in_residues_array}, atom_start: {atom_start_global_idx}, num_atoms: {num_atoms_in_res_npz}", flush=True) # Commented out as per request
 
                 all_atom_entries_for_this_residue_npz = atoms_data[atom_start_global_idx : atom_start_global_idx + num_atoms_in_res_npz]
 
-                # carbonyl_o_assigned_in_residue = False # Removed for OXT logic reversion
-                # is_c_terminal_residue = (res_offset_in_chain == num_residues_in_chain - 1) # Keep, general property
-                # is_standard_protein_residue = is_standard_residue # Keep, general property (alias for is_standard_residue)
+                # Contextual logic for OXT naming was removed in a previous step.
+                # is_c_terminal_residue might be useful for other logic if needed later.
+                # is_c_terminal_residue = (res_offset_in_chain == num_residues_in_chain - 1)
 
 
                 # Iterate through atoms in this residue

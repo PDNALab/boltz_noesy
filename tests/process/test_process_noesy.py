@@ -89,7 +89,7 @@ def get_mock_npz_data():
         'coords': np.array(mock_global_coords_data, dtype=object),
         'residues': np.array([
             # (resname, type_idx_placeholder, res_seq_in_chain_0idx, atom_start_idx, num_atoms, placeholder1, placeholder2, is_standard_residue_flag)
-            ('GLY', 0, 0, 0, 4, None, None, True), # GLY: res_seq_idx 0, atom_start 0, num_atoms 4, standard
+            ('GLY', 0, 0, 0, 4, None, None, False), # GLY: res_seq_idx 0, atom_start 0, num_atoms 4, NOW NON-STANDARD
             ('TYR', 1, 1, 4, 11, None, None, True) # TYR: res_seq_idx 1, atom_start 4, num_atoms 11, standard
         ], dtype=object),
         'chains': np.array([
@@ -191,25 +191,12 @@ class TestProcessNoesy(unittest.TestCase):
 
         pdb_content = pdb_output_io.getvalue().splitlines()
 
-        # Expected: 4 ATOM (GLY) + 11 ATOM (TYR) + 1 TER (after chain A) + 1 END = 17 lines
-        self.assertEqual(len(pdb_content), 17)
+        # Expected: GLY (non-standard) is skipped. 11 ATOM (TYR) + 1 TER (after chain A) + 1 END = 13 lines
+        self.assertEqual(len(pdb_content), 13)
 
-        # Check first atom (GLY, N) - Name from decode_atom_name_from_4i1
-        # ATOM      1  N   GLY A   1      1.000   2.000   3.000  1.00  0.00           N
-        # Our map_atom_info_to_pdb_atom_name gives " N  "
-        # Our res_seq_num_pdb is 0-idx from npz + 1. GLY is res_entry[3]=0 -> PDB res_num 1
-        # Chain ID 'A' from mock_data['chains'][0][0]
-        self.assertTrue(pdb_content[0].startswith("ATOM "))
-        self.assertEqual(pdb_content[0][7:11].strip(), "1")    # Atom serial
-        self.assertEqual(pdb_content[0][12:16], " N  ")        # Atom name
-        self.assertEqual(pdb_content[0][17:20], "GLY")         # Residue name
-        self.assertEqual(pdb_content[0][21], "A")              # Chain ID
-        self.assertEqual(pdb_content[0][22:26].strip(), "1")   # Residue sequence number
-        self.assertAlmostEqual(float(pdb_content[0][30:38]), 1.000) # X
-        self.assertEqual(pdb_content[0][76:78].strip(), "N")   # Element
-
-        # Check last atom (ALA, CB)
-        # Check TYR atoms (starting from pdb_content[4], which is TYR N, atom serial 5)
+        # GLY atoms are skipped. Assertions for TYR atoms now start from pdb_content[0].
+        # TYR atom serials now start from 1.
+        # Check TYR atoms (starting from pdb_content[0], which is TYR N, atom serial 1)
         # Expected TYR atom names (padded): N, CA, C, O, CB, CG, CD1, CE1, CZ, OH, OXT
         # Based on _apply_pdb_atom_name_padding:
         # N -> " N  ", CA -> " CA ", C -> " C  ", O -> " O  ", CB -> " CB "
@@ -224,7 +211,7 @@ class TestProcessNoesy(unittest.TestCase):
         ]
 
         tyr_atom_coords = [
-            self.mock_npz_data['atoms'][4][3], # TYR N coords
+            self.mock_npz_data['atoms'][4][3], # TYR N coords (original index in full atoms_data)
             self.mock_npz_data['atoms'][5][3], # TYR CA coords
             self.mock_npz_data['atoms'][6][3], # TYR C coords
             self.mock_npz_data['atoms'][7][3], # TYR O coords
@@ -238,15 +225,15 @@ class TestProcessNoesy(unittest.TestCase):
         ]
 
         for i in range(11): # 11 atoms for TYR
-            line_idx = i + 4 # GLY has 4 atoms, so TYR lines start at index 4
-            atom_serial_expected = str(i + 5) # GLY 1-4, TYR starts at 5
+            line_idx = i  # TYR lines now start at index 0
+            atom_serial_expected = str(i + 1) # TYR atom serials now start from 1
 
             self.assertTrue(pdb_content[line_idx].startswith("ATOM "))
             self.assertEqual(pdb_content[line_idx][7:11].strip(), atom_serial_expected)
             self.assertEqual(pdb_content[line_idx][12:16], expected_tyr_atom_names_pdb[i])
             self.assertEqual(pdb_content[line_idx][17:20], "TYR")
             self.assertEqual(pdb_content[line_idx][21], "A")
-            self.assertEqual(pdb_content[line_idx][22:26].strip(), "2") # TYR is residue 2
+            self.assertEqual(pdb_content[line_idx][22:26].strip(), "2") # TYR is residue 2 (original seq num)
             self.assertAlmostEqual(float(pdb_content[line_idx][30:38]), tyr_atom_coords[i][0]) # X coord
             self.assertAlmostEqual(float(pdb_content[line_idx][38:46]), tyr_atom_coords[i][1]) # Y coord
             self.assertAlmostEqual(float(pdb_content[line_idx][46:54]), tyr_atom_coords[i][2]) # Z coord
@@ -256,16 +243,16 @@ class TestProcessNoesy(unittest.TestCase):
                                ("N" if expected_tyr_atom_names_pdb[i].strip() == "N" else "C")
             self.assertEqual(pdb_content[line_idx][76:78].strip(), expected_element)
 
-        # Check TER record for Chain A (after 15 ATOM lines)
-        # TER    16      TYR A   2
-        self.assertTrue(pdb_content[15].startswith("TER  "))
-        self.assertEqual(pdb_content[15][6:11].strip(), "16") # TER serial (15 atoms + 1)
-        self.assertEqual(pdb_content[15][17:20], "TYR")       # Last residue name in chain
-        self.assertEqual(pdb_content[15][21], "A")            # Chain ID
-        self.assertEqual(pdb_content[15][22:26].strip(), "2") # Last residue sequence number
+        # Check TER record for Chain A (after 11 TYR ATOM lines)
+        # TER    12      TYR A   2
+        self.assertTrue(pdb_content[11].startswith("TER  "))
+        self.assertEqual(pdb_content[11][6:11].strip(), "12") # TER serial (11 atoms + 1)
+        self.assertEqual(pdb_content[11][17:20], "TYR")       # Last residue name in chain
+        self.assertEqual(pdb_content[11][21], "A")            # Chain ID
+        self.assertEqual(pdb_content[11][22:26].strip(), "2") # Last residue sequence number
 
         # Check END record (last line)
-        self.assertTrue(pdb_content[16].startswith("END"))
+        self.assertTrue(pdb_content[12].startswith("END"))
 
 
     # --- Tests for add_hydrogens (updated for new error handling and logging) ---
