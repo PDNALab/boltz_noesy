@@ -55,7 +55,7 @@ RELEVANT_ATOMS = {
 # Backbone amide hydrogen (for NOESY peak picking)
 BACKBONE_AMIDE = "H"
 
-PDB2PQR_PATH = "/home/swebot/.local/bin/pdb2pqr30" # Path to pdb2pqr executable
+PDB2PQR_PATH = "/orange/alberto.perezant/imesh.ranaweera/noesy_project/boltzNOESY/boltz/boltznoesy_env/bin/pdb2pqr30" # Path to pdb2pqr executable
 
 
 def add_hydrogens(pdb_file: str, output_pdb_file: str) -> bool:
