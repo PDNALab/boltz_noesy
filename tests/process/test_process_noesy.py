@@ -40,14 +40,14 @@ def get_mock_npz_data():
     coords_gly_n   = [1.0, 2.0, 3.0]
     coords_gly_ca  = [1.1, 2.1, 3.1]
     coords_gly_c   = [1.2, 2.2, 3.2]
-    coords_gly_o   = [1.3, 2.3, 3.3]
+    coords_gly_o_zero = [0.0, 0.0, 0.0] # GLY Oxygen with zero coordinates
 
     # Coords for TYR (Residue 2)
     coords_tyr_n   = [2.0, 3.0, 4.0]
     coords_tyr_ca  = [2.1, 3.1, 4.1]
     coords_tyr_c   = [2.2, 3.2, 4.2]
     coords_tyr_o   = [2.3, 3.3, 4.3] # Main carbonyl O
-    coords_tyr_cb  = [2.4, 3.4, 4.4]
+    coords_tyr_cb_zero = [0.0, 0.0, 0.0] # TYR CB with zero coordinates
     coords_tyr_cg  = [2.5, 3.5, 4.5]
     coords_tyr_cd1 = [2.6, 3.6, 4.6]
     coords_tyr_ce1 = [2.7, 3.7, 4.7]
@@ -61,13 +61,13 @@ def get_mock_npz_data():
         (encode_atom_name_to_4i1("N"),  7, 0, coords_gly_n,  [0.0]*3, True, 0),
         (encode_atom_name_to_4i1("CA"), 6, 0, coords_gly_ca, [0.0]*3, True, 0),
         (encode_atom_name_to_4i1("C"),  6, 0, coords_gly_c,  [0.0]*3, True, 0),
-        (encode_atom_name_to_4i1("O"),  8, 0, coords_gly_o,  [0.0]*3, True, 0),
+        (encode_atom_name_to_4i1("O"),  8, 0, coords_gly_o_zero,  [0.0]*3, True, 0), # GLY O with (0,0,0)
         # Res2: TYR (N, CA, C, O, CB, CG, CD1, CE1, CZ, OH, OXT) - 11 atoms
         (encode_atom_name_to_4i1("N"),   7, 0, coords_tyr_n,   [0.0]*3, True, 0), # Atom idx 4
         (encode_atom_name_to_4i1("CA"),  6, 0, coords_tyr_ca,  [0.0]*3, True, 0), # Atom idx 5
         (encode_atom_name_to_4i1("C"),   6, 0, coords_tyr_c,   [0.0]*3, True, 0), # Atom idx 6
         (encode_atom_name_to_4i1("O"),   8, 0, coords_tyr_o,   [0.0]*3, True, 0), # Atom idx 7 (main O)
-        (encode_atom_name_to_4i1("CB"),  6, 0, coords_tyr_cb,  [0.0]*3, True, 0), # Atom idx 8
+        (encode_atom_name_to_4i1("CB"),  6, 0, coords_tyr_cb_zero,  [0.0]*3, True, 0), # TYR CB with (0,0,0)
         (encode_atom_name_to_4i1("CG"),  6, 0, coords_tyr_cg,  [0.0]*3, True, 0), # Atom idx 9
         (encode_atom_name_to_4i1("CD1"), 6, 0, coords_tyr_cd1, [0.0]*3, True, 0), # Atom idx 10
         (encode_atom_name_to_4i1("CE1"), 6, 0, coords_tyr_ce1, [0.0]*3, True, 0), # Atom idx 11
@@ -77,10 +77,9 @@ def get_mock_npz_data():
     ]
 
     mock_global_coords_data = [ # Should match mock_atoms_data order
-        (coords_gly_n,), (coords_gly_ca,), (coords_gly_c,), (coords_gly_o,),
-        (coords_gly_n,), (coords_gly_ca,), (coords_gly_c,), (coords_gly_o,),
+        (coords_gly_n,), (coords_gly_ca,), (coords_gly_c,), (coords_gly_o_zero,), # GLY O zeroed
         (coords_tyr_n,), (coords_tyr_ca,), (coords_tyr_c,), (coords_tyr_o,),
-        (coords_tyr_cb,), (coords_tyr_cg,), (coords_tyr_cd1,), (coords_tyr_ce1,),
+        (coords_tyr_cb_zero,), (coords_tyr_cg,), (coords_tyr_cd1,), (coords_tyr_ce1,), # TYR CB zeroed
         (coords_tyr_cz,), (coords_tyr_oh,), (coords_tyr_oxt,)
     ]
 
@@ -89,7 +88,7 @@ def get_mock_npz_data():
         'coords': np.array(mock_global_coords_data, dtype=object),
         'residues': np.array([
             # (resname, type_idx_placeholder, res_seq_in_chain_0idx, atom_start_idx, num_atoms, placeholder1, placeholder2, is_standard_residue_flag)
-            ('GLY', 0, 0, 0, 4, None, None, False), # GLY: res_seq_idx 0, atom_start 0, num_atoms 4, NOW NON-STANDARD
+            ('GLY', 0, 0, 0, 4, None, None, True), # GLY: res_seq_idx 0, atom_start 0, num_atoms 4, STANDARD
             ('TYR', 1, 1, 4, 11, None, None, True) # TYR: res_seq_idx 1, atom_start 4, num_atoms 11, standard
         ], dtype=object),
         'chains': np.array([
@@ -177,26 +176,40 @@ class TestProcessNoesy(unittest.TestCase):
         self.assertEqual(decode_atom_name_from_4i1(encode_atom_name_to_4i1("  N ")), " N  ") # Encodes "N"
         self.assertEqual(decode_atom_name_from_4i1(encode_atom_name_to_4i1("CA  ")), " CA ") # Encodes "CA"
 
-
-    def test_write_temp_pdb_from_npz(self):
-        # mock_data has GLY (4 atoms) and TYR (now 11 atoms: N,CA,C,O,CB,CG,CD1,CE1,CZ,OH,OXT)
-        # Atom names in mock_data are now 4i1 encoded.
+    @patch('scripts.process.process_noesy.logger') # Mock logger
+    def test_write_temp_pdb_from_npz(self, mock_logger):
+        # GLY: N,CA,C (O is 0,0,0) -> 3 atoms
+        # TYR: N,CA,C,O, CG,CD1,CE1,CZ,OH,OXT (CB is 0,0,0) -> 10 atoms
         mock_data = get_mock_npz_data()
 
-        # Use io.StringIO to capture PDB output
         pdb_output_io = io.StringIO()
-
         with patch('builtins.open', return_value=pdb_output_io, create=True):
             write_temp_pdb_from_npz(mock_data, "dummy_path.pdb")
-
         pdb_content = pdb_output_io.getvalue().splitlines()
 
-        # Expected: GLY (non-standard) is skipped. 11 ATOM (TYR) + 1 TER (after chain A) + 1 END = 13 lines
-        self.assertEqual(len(pdb_content), 13)
+        # Expected: 3 (GLY) + 10 (TYR) = 13 ATOM lines + 1 TER + 1 END = 15 lines
+        self.assertEqual(len(pdb_content), 15)
 
-        # GLY atoms are skipped. Assertions for TYR atoms now start from pdb_content[0].
-        # TYR atom serials now start from 1.
-        # Check TYR atoms (starting from pdb_content[0], which is TYR N, atom serial 1)
+        # --- Check GLY atoms (N, CA, C) --- Serials 1, 2, 3
+        # GLY N
+        self.assertTrue(pdb_content[0].startswith("ATOM "))
+        self.assertEqual(pdb_content[0][7:11].strip(), "1")    # Serial
+        self.assertEqual(pdb_content[0][12:16], " N  ")        # Atom name
+        self.assertEqual(pdb_content[0][17:20], "GLY")         # Residue name
+        self.assertAlmostEqual(float(pdb_content[0][30:38]), 1.000) # X coord_gly_n
+
+        # GLY CA
+        self.assertEqual(pdb_content[1][7:11].strip(), "2")
+        self.assertEqual(pdb_content[1][12:16], " CA ")
+
+        # GLY C
+        self.assertEqual(pdb_content[2][7:11].strip(), "3")
+        self.assertEqual(pdb_content[2][12:16], " C  ")
+
+        # --- Check TYR atoms (N,CA,C,O, CG,CD1,CE1,CZ,OH,OXT) --- Serials 4-13
+        # TYR CB is skipped (was atom index 8 in NPZ, 5th atom of TYR)
+        # Original TYR atom names (before skipping CB): N, CA, C, O, CB, CG, CD1, CE1, CZ, OH, OXT
+        # Expected TYR atom names in PDB (CB skipped): N, CA, C, O, CG, CD1, CE1, CZ, OH, OXT
         # Expected TYR atom names (padded): N, CA, C, O, CB, CG, CD1, CE1, CZ, OH, OXT
         # Based on _apply_pdb_atom_name_padding:
         # N -> " N  ", CA -> " CA ", C -> " C  ", O -> " O  ", CB -> " CB "
@@ -204,55 +217,55 @@ class TestProcessNoesy(unittest.TestCase):
         # OH -> " OH  "
         # OXT -> " OXT"
         # These are based on the NEW decode_atom_name_from_4i1 padding logic.
-        expected_tyr_atom_names_pdb = [
-            " N  ", " CA ", " C  ", " O  ", " CB ",
+        expected_tyr_pdb_names_filtered = [ # CB is removed
+            " N  ", " CA ", " C  ", " O  ",
             " CG  ", "CD1 ", "CE1 ", " CZ  ", " OH  ",
             " OXT"
         ]
 
-        tyr_atom_coords = [
-            self.mock_npz_data['atoms'][4][3], # TYR N coords (original index in full atoms_data)
-            self.mock_npz_data['atoms'][5][3], # TYR CA coords
-            self.mock_npz_data['atoms'][6][3], # TYR C coords
-            self.mock_npz_data['atoms'][7][3], # TYR O coords
-            self.mock_npz_data['atoms'][8][3], # TYR CB coords
-            self.mock_npz_data['atoms'][9][3], # TYR CG coords
-            self.mock_npz_data['atoms'][10][3],# TYR CD1 coords
-            self.mock_npz_data['atoms'][11][3],# TYR CE1 coords
-            self.mock_npz_data['atoms'][12][3],# TYR CZ coords
-            self.mock_npz_data['atoms'][13][3],# TYR OH coords
-            self.mock_npz_data['atoms'][14][3] # TYR OXT coords
-        ]
+        # Original NPZ indices for TYR atoms that are *not* skipped
+        tyr_npz_indices_written = [4, 5, 6, 7, 9, 10, 11, 12, 13, 14]
 
-        for i in range(11): # 11 atoms for TYR
-            line_idx = i  # TYR lines now start at index 0
-            atom_serial_expected = str(i + 1) # TYR atom serials now start from 1
+        for i, npz_atom_idx in enumerate(tyr_npz_indices_written):
+            line_idx = i + 3 # GLY has 3 atoms, so TYR lines start at index 3
+            atom_serial_expected = str(i + 4) # GLY 1-3, TYR starts at 4
 
             self.assertTrue(pdb_content[line_idx].startswith("ATOM "))
             self.assertEqual(pdb_content[line_idx][7:11].strip(), atom_serial_expected)
-            self.assertEqual(pdb_content[line_idx][12:16], expected_tyr_atom_names_pdb[i])
+            self.assertEqual(pdb_content[line_idx][12:16], expected_tyr_pdb_names_filtered[i])
             self.assertEqual(pdb_content[line_idx][17:20], "TYR")
             self.assertEqual(pdb_content[line_idx][21], "A")
-            self.assertEqual(pdb_content[line_idx][22:26].strip(), "2") # TYR is residue 2 (original seq num)
-            self.assertAlmostEqual(float(pdb_content[line_idx][30:38]), tyr_atom_coords[i][0]) # X coord
-            self.assertAlmostEqual(float(pdb_content[line_idx][38:46]), tyr_atom_coords[i][1]) # Y coord
-            self.assertAlmostEqual(float(pdb_content[line_idx][46:54]), tyr_atom_coords[i][2]) # Z coord
+            self.assertEqual(pdb_content[line_idx][22:26].strip(), "2") # TYR is residue 2
 
-            # Check element symbol (last part of PDB line)
-            expected_element = "O" if expected_tyr_atom_names_pdb[i].strip() in ["O", "OH", "OXT"] else \
-                               ("N" if expected_tyr_atom_names_pdb[i].strip() == "N" else "C")
+            current_atom_coords = self.mock_npz_data['atoms'][npz_atom_idx][3]
+            self.assertAlmostEqual(float(pdb_content[line_idx][30:38]), current_atom_coords[0]) # X
+            self.assertAlmostEqual(float(pdb_content[line_idx][38:46]), current_atom_coords[1]) # Y
+            self.assertAlmostEqual(float(pdb_content[line_idx][46:54]), current_atom_coords[2]) # Z
+
+            expected_element = "O" if expected_tyr_pdb_names_filtered[i].strip() in ["O", "OH", "OXT"] else \
+                               ("N" if expected_tyr_pdb_names_filtered[i].strip() == "N" else "C")
             self.assertEqual(pdb_content[line_idx][76:78].strip(), expected_element)
 
-        # Check TER record for Chain A (after 11 TYR ATOM lines)
-        # TER    12      TYR A   2
-        self.assertTrue(pdb_content[11].startswith("TER  "))
-        self.assertEqual(pdb_content[11][6:11].strip(), "12") # TER serial (11 atoms + 1)
-        self.assertEqual(pdb_content[11][17:20], "TYR")       # Last residue name in chain
-        self.assertEqual(pdb_content[11][21], "A")            # Chain ID
-        self.assertEqual(pdb_content[11][22:26].strip(), "2") # Last residue sequence number
+        # Check TER record for Chain A (after 3 + 10 = 13 ATOM lines)
+        # TER    14      TYR A   2
+        self.assertTrue(pdb_content[13].startswith("TER  "))
+        self.assertEqual(pdb_content[13][6:11].strip(), "14") # TER serial (13 atoms + 1)
+        self.assertEqual(pdb_content[13][17:20], "TYR")       # Last residue name in chain
+        self.assertEqual(pdb_content[13][21], "A")            # Chain ID
+        self.assertEqual(pdb_content[13][22:26].strip(), "2") # Last residue sequence number
 
         # Check END record (last line)
-        self.assertTrue(pdb_content[12].startswith("END"))
+        self.assertTrue(pdb_content[14].startswith("END"))
+
+        # Check logger calls for skipped atoms
+        # GLY O: original global index 3 (0-indexed), would-be serial 3 (GLY N,CA,C) + 1 = 4
+        # TYR CB: original global index 8 (0-indexed), would-be serial 3 (GLY) + 4 (TYR N,CA,C,O) + 1 = 8
+        mock_logger.info.assert_any_call(
+            "Atom 4 (Residue: GLY1, NPZ global_atom_idx: 3) has (0,0,0) coordinates. Skipping."
+        )
+        mock_logger.info.assert_any_call(
+            "Atom 8 (Residue: TYR2, NPZ global_atom_idx: 8) has (0,0,0) coordinates. Skipping."
+        )
 
 
     # --- Tests for add_hydrogens (updated for new error handling and logging) ---

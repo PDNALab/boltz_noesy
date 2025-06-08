@@ -420,6 +420,14 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
 
                     x, y, z = coord_list_from_atom_entry[0], coord_list_from_atom_entry[1], coord_list_from_atom_entry[2]
 
+                    if x == 0.0 and y == 0.0 and z == 0.0:
+                        logger.info(
+                            f"Atom {atom_serial + 1} (Residue: {res_name}{res_seq_num_for_pdb}, "
+                            f"NPZ global_atom_idx: {global_atom_idx_for_atoms_array}) "
+                            f"has (0,0,0) coordinates. Skipping."
+                        )
+                        continue # Skip to the next atom
+
                     # Reverted atom naming to use decode_atom_name_from_4i1
                     # Ensure atom_npz_entry_original[0] (encoded_name_field) is valid before decoding
                     # Assuming atom_npz_entry_original[0] is a numpy array like np.dtype("4i1")
