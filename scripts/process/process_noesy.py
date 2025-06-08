@@ -741,7 +741,7 @@ def main():
             logger.info(f"Successfully added hydrogens: {temp_hydro_pdb_name}")
 
             # 4. Generate NOESY data from the hydrogenated PDB
-            noesy_data = generate_noesy_data(temp_hydro_pdb_file, args.distance_cutoff)
+            noesy_data = generate_noesy_data(temp_hydro_pdb_name, args.distance_cutoff)
 
             if noesy_data:
                 output_noesy_filename = os.path.join(args.output_dir, f"{name_part_npz}_noesy.txt")
