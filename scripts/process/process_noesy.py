@@ -130,26 +130,41 @@ def decode_atom_name_from_4i1(encoded_name: np.ndarray) -> str:
             chars.append(char)
         name = "".join(chars).strip()
 
-        # Format to 4 characters for PDB, attempting common conventions.
-        if len(name) == 4: # e.g., "HD21"
-            return name
-        elif len(name) == 3: # e.g., "OXT", "HG1" (H on gamma C1)
-            # If numeric is first, like "1HG", usually means H is first on G. PDB: "1HG "
-            # If alpha is first, like "OXT", PDB: "OXT "
+        if not name: # Empty name after strip
+            logger.warning(f"Decoded atom name from {encoded_name!r} is empty. Using fallback 'UNK'.")
+            return "UNK "
+
+        name_len = len(name)
+
+        if name_len == 1: # e.g., N, C, O, S
+            return f" {name}  "
+        elif name_len == 2:
+            # For atoms like CA, CB, SD, OH etc. (alpha char first or mixed)
+            # PDB standard is usually space, 2 chars, space e.g. " CA ", " OH "
+            # Hydrogens like H1, H2 if encoded as "H1" would be "H1  " by f"{name:<4}"
+            # Let's assume non-digit first for this category for now.
+            if name[0].isalpha(): # Covers CA, CB, SD, OH
+                 return f" {name} "
+            else: # Covers things like "1H" if it was stripped to "1H" - this typically becomes "1H  "
+                 return f"{name:<4}"
+        elif name_len == 3:
+            if name == "OXT":
+                return " OXT" # Special case for OXT
+            # For other 3-char names, PDB standard varies (e.g., " CG1", "NE2 ").
+            # Common for hydrogens: "1HG", "2HD" -> "1HG ", "2HD "
+            # Common for heavy: "CG1", "CD2" -> "CG1 ", "CD2 "
+            # Some like "NE2" in HIS can be " NE2"
+            # A simple heuristic: if starts with letter, left-align. If starts with digit (hydrogens), left-align.
+            # This makes CG1 -> "CG1 ", 1HG -> "1HG "
             return f"{name:<4}"
-        elif len(name) == 2: # e.g., "CA", "SD"
-            return f" {name:<2} " # Pad with space on left and right: " CA ", " SD "
-        elif len(name) == 1: # e.g., "N", "C", "O"
-            return f" {name}  "  # Pad with space on left and two on right: " N  "
-        elif len(name) == 0:
-             logger.warning(f"Decoded atom name from {encoded_name} is empty. Using fallback 'UNK'.")
-             return "UNK " # Fallback, 4-chars
-        else: # Longer than 4, truncate (should not happen with 4i1 if properly decoded)
-            logger.warning(f"Decoded atom name '{name}' from {encoded_name} is longer than 4 chars. Truncating.")
-            return name[:4]
+        elif name_len == 4: # e.g., "HD21"
+            return name
+        else: # Longer than 4, should ideally not happen from PDB names
+            logger.warning(f"Decoded atom name '{name}' (from {encoded_name!r}) is longer than 4 chars. Truncating.")
+            return name[:4] # Truncate and return (already 4 chars)
 
     except Exception as e:
-        logger.error(f"Error decoding atom name from {encoded_name}: {e}. Using fallback 'ERR'.")
+        logger.error(f"Error decoding atom name from {encoded_name!r}: {e}. Using fallback 'ERR'.")
         return "ERR " # Error fallback, 4-chars
 
 def parse_npz(npz_file_path: str) -> dict:
@@ -445,10 +460,26 @@ def write_temp_pdb_from_npz(npz_data: dict, temp_pdb_path: str):
                     chain_processed_atom_count += 1 # Increment per-chain atom counter
 
                     # Using res_name[:3] to ensure it's max 3 chars for PDB
-                    # atom_name_pdb from decode_atom_name_from_4i1 should already be 4 chars.
+                    # atom_name_pdb from decode_atom_name_from_4i1 is a 4-char string for columns 13-16.
+                    # alt_loc for column 17, typically blank.
+                    # res_name is left-aligned in columns 18-20.
+                    # chain_id in column 22.
+                    # res_seq_num_for_pdb in columns 23-26.
+                    # iCode (insertion code) in column 27, typically blank.
+                    # Coordinates (x,y,z) in 31-38, 39-46, 47-54.
+                    # Occupancy (1.00) in 55-60.
+                    # B-factor (0.00) in 61-66.
+                    # Element symbol right-justified in 77-78.
+                    # Charge (blank) in 79-80.
+
+                    alt_loc = ' ' # Alternate location indicator (column 17)
+                    icode = ' '   # Insertion code (column 27)
+
                     pdb_line = (
-                        f"{record_type}{atom_serial:5d} {atom_name_pdb}{res_name[:3]:<3s} {chain_pdb_id:1s}{res_seq_num_for_pdb:4d}    "
-                        f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00          {element_symbol:<2s}\n"
+                        f"{record_type:<6s}{atom_serial:5d} {atom_name_pdb}{alt_loc}" # Cols 1-6, 7-11, 12(space), 13-16, 17
+                        f"{res_name[:3]:<3s} {chain_pdb_id:1s}{res_seq_num_for_pdb:4d}{icode}   " # Cols 18-20, 21(space), 22, 23-26, 27, 28-30(spaces)
+                        f"{x:8.3f}{y:8.3f}{z:8.3f}{1.00:6.2f}{0.00:6.2f}          " # Cols 31-54, 55-60, 61-66, 67-76(spaces)
+                        f"{element_symbol:>2s}  \n" # Cols 77-78 (element), 79-80 (charge, blank)
                     )
                     f.write(pdb_line)
                     atoms_written_count += 1
