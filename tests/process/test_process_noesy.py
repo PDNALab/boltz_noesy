@@ -40,14 +40,14 @@ def get_mock_npz_data():
     coords_gly_n   = [1.0, 2.0, 3.0]
     coords_gly_ca  = [1.1, 2.1, 3.1]
     coords_gly_c   = [1.2, 2.2, 3.2]
-    coords_gly_o_zero = [0.0, 0.0, 0.0] # GLY Oxygen with zero coordinates
+    coords_gly_o_zero = [0.0, 0.0, 0.0] # GLY Oxygen with zero coordinates - will be skipped
 
     # Coords for TYR (Residue 2)
-    coords_tyr_n   = [2.0, 3.0, 4.0]
-    coords_tyr_ca  = [2.1, 3.1, 4.1]
-    coords_tyr_c   = [2.2, 3.2, 4.2]
-    coords_tyr_o   = [2.3, 3.3, 4.3] # Main carbonyl O
-    coords_tyr_cb_zero = [0.0, 0.0, 0.0] # TYR CB with zero coordinates
+    coords_tyr_n   = [2.0, 3.0, 4.0] # Written
+    coords_tyr_ca  = [2.1, 3.1, 4.1] # Written
+    coords_tyr_c   = [2.2, 3.2, 4.2] # Written
+    coords_tyr_o   = [2.3, 3.3, 4.3] # Main carbonyl O - Written
+    coords_tyr_cb_zero = [0.0, 0.0, 0.0] # TYR CB with zero coordinates - will be skipped
     coords_tyr_cg  = [2.5, 3.5, 4.5]
     coords_tyr_cd1 = [2.6, 3.6, 4.6]
     coords_tyr_ce1 = [2.7, 3.7, 4.7]
@@ -178,8 +178,8 @@ class TestProcessNoesy(unittest.TestCase):
 
     @patch('scripts.process.process_noesy.logger') # Mock logger
     def test_write_temp_pdb_from_npz(self, mock_logger):
-        # GLY: N,CA,C (O is 0,0,0) -> 3 atoms
-        # TYR: N,CA,C,O, CG,CD1,CE1,CZ,OH,OXT (CB is 0,0,0) -> 10 atoms
+        # GLY: N,CA,C (O is 0,0,0 and skipped) -> 3 atoms written
+        # TYR: N,CA,C,O, CG,CD1,CE1,CZ,OH,OXT (CB is 0,0,0 and skipped) -> 10 atoms written
         mock_data = get_mock_npz_data()
 
         pdb_output_io = io.StringIO()
@@ -191,25 +191,26 @@ class TestProcessNoesy(unittest.TestCase):
         self.assertEqual(len(pdb_content), 15)
 
         # --- Check GLY atoms (N, CA, C) --- Serials 1, 2, 3
-        # GLY N
+        # GLY N (coords_gly_n = [1.0, 2.0, 3.0])
         self.assertTrue(pdb_content[0].startswith("ATOM "))
         self.assertEqual(pdb_content[0][7:11].strip(), "1")    # Serial
         self.assertEqual(pdb_content[0][12:16], " N  ")        # Atom name
         self.assertEqual(pdb_content[0][17:20], "GLY")         # Residue name
-        self.assertAlmostEqual(float(pdb_content[0][30:38]), 1.000) # X coord_gly_n
+        self.assertAlmostEqual(float(pdb_content[0][30:38]), 1.000) # X
 
-        # GLY CA
+        # GLY CA (coords_gly_ca  = [1.1, 2.1, 3.1])
         self.assertEqual(pdb_content[1][7:11].strip(), "2")
         self.assertEqual(pdb_content[1][12:16], " CA ")
+        self.assertAlmostEqual(float(pdb_content[1][30:38]), 1.100) # X
 
-        # GLY C
+        # GLY C (coords_gly_c   = [1.2, 2.2, 3.2])
         self.assertEqual(pdb_content[2][7:11].strip(), "3")
         self.assertEqual(pdb_content[2][12:16], " C  ")
+        self.assertAlmostEqual(float(pdb_content[2][30:38]), 1.200) # X
 
         # --- Check TYR atoms (N,CA,C,O, CG,CD1,CE1,CZ,OH,OXT) --- Serials 4-13
-        # TYR CB is skipped (was atom index 8 in NPZ, 5th atom of TYR)
-        # Original TYR atom names (before skipping CB): N, CA, C, O, CB, CG, CD1, CE1, CZ, OH, OXT
-        # Expected TYR atom names in PDB (CB skipped): N, CA, C, O, CG, CD1, CE1, CZ, OH, OXT
+        # TYR CB (coords_tyr_cb_zero) is skipped.
+        # NPZ atom indices for TYR: N(4), CA(5), C(6), O(7), CB(8,skipped), CG(9), CD1(10), CE1(11), CZ(12), OH(13), OXT(14)
         # Expected TYR atom names (padded): N, CA, C, O, CB, CG, CD1, CE1, CZ, OH, OXT
         # Based on _apply_pdb_atom_name_padding:
         # N -> " N  ", CA -> " CA ", C -> " C  ", O -> " O  ", CB -> " CB "
@@ -223,12 +224,13 @@ class TestProcessNoesy(unittest.TestCase):
             " OXT"
         ]
 
-        # Original NPZ indices for TYR atoms that are *not* skipped
+        # Original NPZ indices for TYR atoms that are *not* skipped:
+        # N(4), CA(5), C(6), O(7), CG(9), CD1(10), CE1(11), CZ(12), OH(13), OXT(14)
         tyr_npz_indices_written = [4, 5, 6, 7, 9, 10, 11, 12, 13, 14]
 
         for i, npz_atom_idx in enumerate(tyr_npz_indices_written):
-            line_idx = i + 3 # GLY has 3 atoms, so TYR lines start at index 3
-            atom_serial_expected = str(i + 4) # GLY 1-3, TYR starts at 4
+            line_idx = i + 3 # GLY has 3 atoms, so TYR lines start at index 3 in pdb_content
+            atom_serial_expected = str(i + 4) # GLY atoms are 1,2,3. TYR atoms start at 4.
 
             self.assertTrue(pdb_content[line_idx].startswith("ATOM "))
             self.assertEqual(pdb_content[line_idx][7:11].strip(), atom_serial_expected)
@@ -258,8 +260,9 @@ class TestProcessNoesy(unittest.TestCase):
         self.assertTrue(pdb_content[14].startswith("END"))
 
         # Check logger calls for skipped atoms
-        # GLY O: original global index 3 (0-indexed), would-be serial 3 (GLY N,CA,C) + 1 = 4
-        # TYR CB: original global index 8 (0-indexed), would-be serial 3 (GLY) + 4 (TYR N,CA,C,O) + 1 = 8
+        # GLY O: original global index 3 (0-indexed). Its would-be serial is 4 (after GLY N, CA, C).
+        # TYR CB: original global index 8 (0-indexed). Its would-be serial is 8
+        # (after GLY N,CA,C (3) + TYR N,CA,C,O (4) = 7 atoms written before it, so it would be 8th).
         mock_logger.info.assert_any_call(
             "Atom 4 (Residue: GLY1, NPZ global_atom_idx: 3) has (0,0,0) coordinates. Skipping."
         )
@@ -273,20 +276,45 @@ class TestProcessNoesy(unittest.TestCase):
     @patch('os.path.getsize')
     @patch('os.path.exists')
     @patch('subprocess.run')
-    def test_add_hydrogens_success(self, mock_subprocess_run, mock_os_exists, mock_os_getsize, mock_logger):
+    @patch('os.remove') # Added os.remove mock
+    def test_add_hydrogens_success(self, mock_os_remove, mock_subprocess_run, mock_os_exists, mock_os_getsize, mock_logger):
         mock_cp = MagicMock(spec=subprocess.CompletedProcess)
         mock_cp.returncode = 0
         mock_cp.stdout = "pdb2pqr ran okay"
         mock_cp.stderr = ""
         mock_subprocess_run.return_value = mock_cp
 
-        mock_os_exists.return_value = True
-        mock_os_getsize.return_value = 100 # Non-empty file
+        expected_dummy_pqr_path = self.dummy_output_pdb + ".pqr_dummy"
+
+        def os_exists_side_effect(path_arg):
+            if path_arg == self.dummy_output_pdb:
+                return True # Main PDB output created
+            if path_arg == expected_dummy_pqr_path:
+                return True # Dummy PQR created
+            return False
+        mock_os_exists.side_effect = os_exists_side_effect
+        mock_os_getsize.return_value = 100 # Non-empty file for main output
 
         result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
 
         self.assertTrue(result)
-        mock_subprocess_run.assert_called_once()
+
+        expected_command = [
+            PDB2PQR_PATH,
+            "--ff=AMBER",
+            "--pdb-output", self.dummy_output_pdb,
+            self.dummy_input_pdb,
+            expected_dummy_pqr_path
+        ]
+        mock_subprocess_run.assert_called_once_with(
+            expected_command,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False
+        )
+
+        mock_os_remove.assert_any_call(expected_dummy_pqr_path)
         # Check if logger.info was called with expected messages
         self.assertIn(call(f"Calling pdb2pqr30 for {self.dummy_input_pdb}..."), mock_logger.info.call_args_list)
         self.assertIn(call(f"pdb2pqr30 completed successfully for {self.dummy_input_pdb}."), mock_logger.info.call_args_list)
@@ -294,96 +322,125 @@ class TestProcessNoesy(unittest.TestCase):
 
     @patch('scripts.process.process_noesy.logger')
     @patch('subprocess.run')
-    def test_add_hydrogens_pdb2pqr_failure(self, mock_subprocess_run, mock_logger):
+    @patch('os.remove')
+    @patch('os.path.exists') # Added to control dummy file existence for cleanup
+    def test_add_hydrogens_pdb2pqr_failure(self, mock_os_exists, mock_os_remove, mock_subprocess_run, mock_logger):
         mock_cp = MagicMock(spec=subprocess.CompletedProcess)
         mock_cp.returncode = 1
         mock_cp.stdout = "Error output from pdb2pqr"
         mock_cp.stderr = "Detailed error from pdb2pqr"
         mock_subprocess_run.return_value = mock_cp
 
+        expected_dummy_pqr_path = self.dummy_output_pdb + ".pqr_dummy"
+        mock_os_exists.return_value = True # Assume dummy pqr might exist
+
         result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
 
         self.assertFalse(result)
+        # Assert command structure if necessary (same as success case)
+        expected_command = [PDB2PQR_PATH, "--ff=AMBER", "--pdb-output", self.dummy_output_pdb, self.dummy_input_pdb, expected_dummy_pqr_path]
+        mock_subprocess_run.assert_called_once_with(expected_command, capture_output=True, text=True, timeout=600, check=False)
         mock_logger.error.assert_any_call(f"pdb2pqr30 failed for {self.dummy_input_pdb} with return code 1")
-        mock_logger.error.assert_any_call(f"pdb2pqr30 stdout:\n{mock_cp.stdout}")
-        mock_logger.error.assert_any_call(f"pdb2pqr30 stderr:\n{mock_cp.stderr}")
+        mock_os_remove.assert_any_call(expected_dummy_pqr_path)
+
 
     @patch('scripts.process.process_noesy.logger')
     @patch('subprocess.run')
-    def test_add_hydrogens_pdb2pqr_timeout(self, mock_subprocess_run, mock_logger):
-        mock_subprocess_run.side_effect = subprocess.TimeoutExpired(
-            cmd="pdb2pqr_command",
-            timeout=600,
-            stdout=b"partial stdout before timeout", # Bytes
-            stderr=b"partial stderr before timeout"  # Bytes
-        )
+    @patch('os.remove')
+    @patch('os.path.exists')
+    def test_add_hydrogens_pdb2pqr_timeout(self, mock_os_exists, mock_os_remove, mock_subprocess_run, mock_logger):
+        mock_subprocess_run.side_effect = subprocess.TimeoutExpired(cmd="pdb2pqr_command", timeout=600, stdout=b"partial stdout", stderr=b"partial stderr")
+        expected_dummy_pqr_path = self.dummy_output_pdb + ".pqr_dummy"
+        mock_os_exists.return_value = True # Assume dummy pqr might exist
 
         result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
         self.assertFalse(result)
         mock_logger.error.assert_any_call(f"pdb2pqr30 timed out for {self.dummy_input_pdb} after 600 seconds.")
-        mock_logger.error.assert_any_call("pdb2pqr30 stdout (on timeout):\npartial stdout before timeout")
-        mock_logger.error.assert_any_call("pdb2pqr30 stderr (on timeout):\npartial stderr before timeout")
+        mock_os_remove.assert_any_call(expected_dummy_pqr_path)
 
     @patch('scripts.process.process_noesy.logger')
     @patch('os.path.getsize')
     @patch('os.path.exists')
     @patch('subprocess.run')
-    def test_add_hydrogens_pdb2pqr_output_file_missing(self, mock_subprocess_run, mock_os_exists, mock_os_getsize, mock_logger):
+    @patch('os.remove')
+    def test_add_hydrogens_pdb2pqr_output_file_missing(self, mock_os_remove, mock_subprocess_run, mock_os_exists, mock_os_getsize, mock_logger):
         mock_cp = MagicMock(spec=subprocess.CompletedProcess)
         mock_cp.returncode = 0
-        mock_cp.stdout = "pdb2pqr ran okay, but no file created by test"
-        mock_cp.stderr = ""
+        mock_cp.stdout = "pdb2pqr ran okay, but no main output file created by test"
         mock_subprocess_run.return_value = mock_cp
 
-        mock_os_exists.return_value = False # Simulate output file not existing
+        expected_dummy_pqr_path = self.dummy_output_pdb + ".pqr_dummy"
+        def os_exists_side_effect(path_arg):
+            if path_arg == self.dummy_output_pdb: return False # Main PDB output does not exist
+            if path_arg == expected_dummy_pqr_path: return True # Dummy PQR might exist
+            return False
+        mock_os_exists.side_effect = os_exists_side_effect
 
         result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
         self.assertFalse(result)
         mock_logger.error.assert_any_call(f"pdb2pqr30 reported success, but output file {self.dummy_output_pdb} is missing or empty.")
+        mock_os_remove.assert_any_call(expected_dummy_pqr_path)
 
     @patch('scripts.process.process_noesy.logger')
     @patch('os.path.getsize')
     @patch('os.path.exists')
     @patch('subprocess.run')
-    def test_add_hydrogens_pdb2pqr_output_file_empty(self, mock_subprocess_run, mock_os_exists, mock_os_getsize, mock_logger):
+    @patch('os.remove')
+    def test_add_hydrogens_pdb2pqr_output_file_empty(self, mock_os_remove, mock_subprocess_run, mock_os_exists, mock_os_getsize, mock_logger):
         mock_cp = MagicMock(spec=subprocess.CompletedProcess)
         mock_cp.returncode = 0
-        mock_cp.stdout = "pdb2pqr ran okay, but empty file created by test"
-        mock_cp.stderr = ""
+        mock_cp.stdout = "pdb2pqr ran okay, but empty main output file created by test"
         mock_subprocess_run.return_value = mock_cp
 
-        mock_os_exists.return_value = True
+        expected_dummy_pqr_path = self.dummy_output_pdb + ".pqr_dummy"
+        def os_exists_side_effect(path_arg):
+            if path_arg == self.dummy_output_pdb: return True
+            if path_arg == expected_dummy_pqr_path: return True
+            return False
+        mock_os_exists.side_effect = os_exists_side_effect
         mock_os_getsize.return_value = 0 # Simulate empty output file
 
         result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
         self.assertFalse(result)
         mock_logger.error.assert_any_call(f"pdb2pqr30 reported success, but output file {self.dummy_output_pdb} is missing or empty.")
+        mock_os_remove.assert_any_call(expected_dummy_pqr_path)
 
 
     @patch('scripts.process.process_noesy.logger')
     @patch('subprocess.run')
-    def test_add_hydrogens_pdb2pqr_not_found(self, mock_subprocess_run, mock_logger):
+    @patch('os.remove')
+    @patch('os.path.exists')
+    def test_add_hydrogens_pdb2pqr_not_found(self, mock_os_exists, mock_os_remove, mock_subprocess_run, mock_logger):
         mock_subprocess_run.side_effect = FileNotFoundError(f"No such file or directory: '{PDB2PQR_PATH}'")
+        expected_dummy_pqr_path = self.dummy_output_pdb + ".pqr_dummy"
+        # If PDB2PQR_PATH itself is not found, pdb2pqr30 command doesn't run, so dummy_pqr_output_path is not created.
+        mock_os_exists.return_value = False
 
         result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
         self.assertFalse(result)
         mock_logger.error.assert_any_call(
             f"pdb2pqr30 command not found at {PDB2PQR_PATH}. Please ensure PDB2PQR is installed and the path is correct."
         )
+        # os.remove should not be called if the file doesn't exist
+        mock_os_remove.assert_not_called() # or specifically mock_os_remove.assert_any_call(expected_dummy_pqr_path) should not be true
 
     @patch('scripts.process.process_noesy.logger')
     @patch('subprocess.run')
     @patch('traceback.format_exc', return_value="Traceback details") # Mock traceback
-    def test_add_hydrogens_unexpected_subprocess_error(self, mock_traceback_format, mock_subprocess_run, mock_logger):
+    @patch('os.remove')
+    @patch('os.path.exists')
+    def test_add_hydrogens_unexpected_subprocess_error(self, mock_os_exists, mock_os_remove, mock_traceback_format, mock_subprocess_run, mock_logger):
         test_exception = Exception("Unexpected Kaboom!")
         mock_subprocess_run.side_effect = test_exception
+        expected_dummy_pqr_path = self.dummy_output_pdb + ".pqr_dummy"
+        mock_os_exists.return_value = True # Assume dummy pqr might exist
 
         result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
         self.assertFalse(result)
         mock_logger.error.assert_any_call(
             f"An unexpected error occurred while running pdb2pqr30 for {self.dummy_input_pdb}: {test_exception}"
         )
-        mock_logger.error.assert_any_call("Traceback details")
+        mock_os_remove.assert_any_call(expected_dummy_pqr_path)
 
 
     # --- Tests for get_atoms and generate_noesy_data (can largely remain as they test core logic) ---

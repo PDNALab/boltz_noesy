@@ -65,16 +65,21 @@ def add_hydrogens(pdb_file: str, output_pdb_file: str) -> bool:
     Returns True on success, False on failure.
     """
     print(f"DEBUG: Entering add_hydrogens function for input: {pdb_file}, output: {output_pdb_file}", flush=True)
+
+    dummy_pqr_output_path = output_pdb_file + ".pqr_dummy"
+
     command = [
         PDB2PQR_PATH,
-        "--ff=AMBER",      # Force field
-        "--pdb-output",    # Request PDB output with hydrogens
-        pdb_file,
-        output_pdb_file
+        "--ff=AMBER",
+        "--pdb-output", output_pdb_file,  # The desired output PDB with hydrogens
+        pdb_file,                         # The input PDB (no hydrogens)
+        dummy_pqr_output_path             # The required positional output_pqr argument
     ]
 
     logger.info(f"Calling pdb2pqr30 for {pdb_file}...")
     logger.info(f"Command: {' '.join(command)}")
+
+    status = False # Default status
 
     try:
         completed_process = subprocess.run(
@@ -89,15 +94,16 @@ def add_hydrogens(pdb_file: str, output_pdb_file: str) -> bool:
             logger.error(f"pdb2pqr30 failed for {pdb_file} with return code {completed_process.returncode}")
             logger.error(f"pdb2pqr30 stdout:\n{completed_process.stdout}")
             logger.error(f"pdb2pqr30 stderr:\n{completed_process.stderr}")
-            return False
+            status = False
         else:
             logger.info(f"pdb2pqr30 completed successfully for {pdb_file}.")
             if not os.path.exists(output_pdb_file) or os.path.getsize(output_pdb_file) == 0:
                 logger.error(f"pdb2pqr30 reported success, but output file {output_pdb_file} is missing or empty.")
                 logger.error(f"pdb2pqr30 stdout (when output file missing/empty):\n{completed_process.stdout}")
                 logger.error(f"pdb2pqr30 stderr (when output file missing/empty):\n{completed_process.stderr}")
-                return False
-            return True
+                status = False
+            else:
+                status = True
 
     except subprocess.TimeoutExpired as e:
         logger.error(f"pdb2pqr30 timed out for {pdb_file} after {e.timeout} seconds.")
@@ -105,15 +111,24 @@ def add_hydrogens(pdb_file: str, output_pdb_file: str) -> bool:
             logger.error(f"pdb2pqr30 stdout (on timeout):\n{e.stdout.decode(errors='replace') if isinstance(e.stdout, bytes) else e.stdout}")
         if e.stderr:
             logger.error(f"pdb2pqr30 stderr (on timeout):\n{e.stderr.decode(errors='replace') if isinstance(e.stderr, bytes) else e.stderr}")
-        return False
+        status = False
     except FileNotFoundError:
         logger.error(f"pdb2pqr30 command not found at {PDB2PQR_PATH}. "
                      "Please ensure PDB2PQR is installed and the path is correct.")
-        return False
+        status = False
     except Exception as e:
         logger.error(f"An unexpected error occurred while running pdb2pqr30 for {pdb_file}: {e}")
         logger.error(traceback.format_exc())
-        return False
+        status = False
+    finally:
+        # Attempt to clean up the dummy PQR file if it was created
+        if os.path.exists(dummy_pqr_output_path):
+            try:
+                os.remove(dummy_pqr_output_path)
+                logger.debug(f"Cleaned up dummy PQR file: {dummy_pqr_output_path}")
+            except OSError as e_remove:
+                logger.warning(f"Could not remove dummy PQR file {dummy_pqr_output_path}: {e_remove}")
+    return status
 
 # --- New NPZ Processing Functions ---
 
