@@ -655,7 +655,7 @@ def generate_noesy_data(pdb_file_with_hydrogens, distance_cutoff=5.0):
                 incorrect_atom_to = "H"
 
             # Generate a slightly perturbed distance
-            noisy_distance = max(1.8, original_distance + random.uniform(-1.0, 1.0)) # Ensure distance is somewhat realistic
+            noisy_distance = min(6.0, max(1.8, original_distance + random.uniform(-1.0, 1.0))) # Ensure distance is somewhat realistic and capped
 
             noisy_lines.append(f"{res_from} {incorrect_res_to_candidate} {original_peak_id} {noisy_distance:.2f} {atom_from} {incorrect_atom_to}")
             # Note: This might create duplicate peak IDs for the *same* res_from, atom_from but different res_to. This is intended to model ambiguity.

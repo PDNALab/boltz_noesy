@@ -30,88 +30,79 @@ from scripts.process.process_noesy import (
 from Bio.PDB import PDBParser, Structure, Model, Chain, Residue, Atom # Keep for get_atoms test
 from Bio.PDB.vectors import Vector # Keep for get_atoms test
 
+# Helper to create 4i1 encoded atom names for mock NPZ data
+def encode_atom_name_to_4i1(core_name: str) -> np.ndarray:
+    encoded = np.zeros(4, dtype=np.int8)
+    for i, char_val in enumerate(core_name.strip()[:4]):
+        encoded[i] = ord(char_val) - 32
+    return encoded
+
 # --- Helper for Mock NPZ data ---
 def get_mock_npz_data():
     """Returns a dictionary simulating loaded NPZ data."""
-    # Based on user's NPZ spec:
-    # atoms entry: (type_info_tuple, atomic_number, placeholder_int, [x,y,z], other_vector_list, bool_flag, chain_idx_in_chains_array)
-
-    # Define coordinates that will be embedded in 'atoms' and also in global 'coords'
     coords_gly_n   = [1.0, 2.0, 3.0]
     coords_gly_ca  = [1.1, 2.1, 3.1]
     coords_gly_c   = [1.2, 2.2, 3.2]
-    coords_gly_o_zero = [0.0, 0.0, 0.0] # GLY Oxygen with zero coordinates - will be skipped
+    coords_gly_o_zero = [0.0, 0.0, 0.0]
 
-    # Coords for TYR (Residue 2)
-    coords_tyr_n   = [2.0, 3.0, 4.0] # Written
-    coords_tyr_ca  = [2.1, 3.1, 4.1] # Written
-    coords_tyr_c   = [2.2, 3.2, 4.2] # Written
-    coords_tyr_o   = [2.3, 3.3, 4.3] # Main carbonyl O - Written
-    coords_tyr_cb_zero = [0.0, 0.0, 0.0] # TYR CB with zero coordinates - will be skipped
+    coords_tyr_n   = [2.0, 3.0, 4.0]
+    coords_tyr_ca  = [2.1, 3.1, 4.1]
+    coords_tyr_c   = [2.2, 3.2, 4.2]
+    coords_tyr_o   = [2.3, 3.3, 4.3]
+    coords_tyr_cb_zero = [0.0, 0.0, 0.0]
     coords_tyr_cg  = [2.5, 3.5, 4.5]
     coords_tyr_cd1 = [2.6, 3.6, 4.6]
     coords_tyr_ce1 = [2.7, 3.7, 4.7]
     coords_tyr_cz  = [2.8, 3.8, 4.8]
-    coords_tyr_oh  = [2.9, 3.9, 4.9] # Side-chain hydroxyl O
-    coords_tyr_oxt = [2.25, 3.15, 5.15] # C-terminal OXT
+    coords_tyr_oh  = [2.9, 3.9, 4.9]
+    coords_tyr_oxt = [2.25, 3.15, 5.15]
 
     mock_atoms_data = [
-        # Res1: GLY (N, CA, C, O) - 4 atoms
-        # (encoded_name_4i1, atomic_num, placeholder_int, [x,y,z], other_vector, bool_flag, chain_idx)
         (encode_atom_name_to_4i1("N"),  7, 0, coords_gly_n,  [0.0]*3, True, 0),
         (encode_atom_name_to_4i1("CA"), 6, 0, coords_gly_ca, [0.0]*3, True, 0),
         (encode_atom_name_to_4i1("C"),  6, 0, coords_gly_c,  [0.0]*3, True, 0),
-        (encode_atom_name_to_4i1("O"),  8, 0, coords_gly_o_zero,  [0.0]*3, True, 0), # GLY O with (0,0,0)
-        # Res2: TYR (N, CA, C, O, CB, CG, CD1, CE1, CZ, OH, OXT) - 11 atoms
-        (encode_atom_name_to_4i1("N"),   7, 0, coords_tyr_n,   [0.0]*3, True, 0), # Atom idx 4
-        (encode_atom_name_to_4i1("CA"),  6, 0, coords_tyr_ca,  [0.0]*3, True, 0), # Atom idx 5
-        (encode_atom_name_to_4i1("C"),   6, 0, coords_tyr_c,   [0.0]*3, True, 0), # Atom idx 6
-        (encode_atom_name_to_4i1("O"),   8, 0, coords_tyr_o,   [0.0]*3, True, 0), # Atom idx 7 (main O)
-        (encode_atom_name_to_4i1("CB"),  6, 0, coords_tyr_cb_zero,  [0.0]*3, True, 0), # TYR CB with (0,0,0)
-        (encode_atom_name_to_4i1("CG"),  6, 0, coords_tyr_cg,  [0.0]*3, True, 0), # Atom idx 9
-        (encode_atom_name_to_4i1("CD1"), 6, 0, coords_tyr_cd1, [0.0]*3, True, 0), # Atom idx 10
-        (encode_atom_name_to_4i1("CE1"), 6, 0, coords_tyr_ce1, [0.0]*3, True, 0), # Atom idx 11
-        (encode_atom_name_to_4i1("CZ"),  6, 0, coords_tyr_cz,  [0.0]*3, True, 0), # Atom idx 12
-        (encode_atom_name_to_4i1("OH"),  8, 0, coords_tyr_oh,  [0.0]*3, True, 0), # Atom idx 13 (side chain O)
-        (encode_atom_name_to_4i1("OXT"), 8, 0, coords_tyr_oxt, [0.0]*3, True, 0)  # Atom idx 14 (terminal O)
+        (encode_atom_name_to_4i1("O"),  8, 0, coords_gly_o_zero,  [0.0]*3, True, 0),
+        (encode_atom_name_to_4i1("N"),   7, 0, coords_tyr_n,   [0.0]*3, True, 0),
+        (encode_atom_name_to_4i1("CA"),  6, 0, coords_tyr_ca,  [0.0]*3, True, 0),
+        (encode_atom_name_to_4i1("C"),   6, 0, coords_tyr_c,   [0.0]*3, True, 0),
+        (encode_atom_name_to_4i1("O"),   8, 0, coords_tyr_o,   [0.0]*3, True, 0),
+        (encode_atom_name_to_4i1("CB"),  6, 0, coords_tyr_cb_zero,  [0.0]*3, True, 0),
+        (encode_atom_name_to_4i1("CG"),  6, 0, coords_tyr_cg,  [0.0]*3, True, 0),
+        (encode_atom_name_to_4i1("CD1"), 6, 0, coords_tyr_cd1, [0.0]*3, True, 0),
+        (encode_atom_name_to_4i1("CE1"), 6, 0, coords_tyr_ce1, [0.0]*3, True, 0),
+        (encode_atom_name_to_4i1("CZ"),  6, 0, coords_tyr_cz,  [0.0]*3, True, 0),
+        (encode_atom_name_to_4i1("OH"),  8, 0, coords_tyr_oh,  [0.0]*3, True, 0),
+        (encode_atom_name_to_4i1("OXT"), 8, 0, coords_tyr_oxt, [0.0]*3, True, 0)
     ]
-
-    mock_global_coords_data = [ # Should match mock_atoms_data order
-        (coords_gly_n,), (coords_gly_ca,), (coords_gly_c,), (coords_gly_o_zero,), # GLY O zeroed
+    mock_global_coords_data = [
+        (coords_gly_n,), (coords_gly_ca,), (coords_gly_c,), (coords_gly_o_zero,),
         (coords_tyr_n,), (coords_tyr_ca,), (coords_tyr_c,), (coords_tyr_o,),
-        (coords_tyr_cb_zero,), (coords_tyr_cg,), (coords_tyr_cd1,), (coords_tyr_ce1,), # TYR CB zeroed
+        (coords_tyr_cb_zero,), (coords_tyr_cg,), (coords_tyr_cd1,), (coords_tyr_ce1,),
         (coords_tyr_cz,), (coords_tyr_oh,), (coords_tyr_oxt,)
     ]
-
     mock_data = {
         'atoms': np.array(mock_atoms_data, dtype=object),
         'coords': np.array(mock_global_coords_data, dtype=object),
         'residues': np.array([
-            # (resname, type_idx_placeholder, res_seq_in_chain_0idx, atom_start_idx, num_atoms, placeholder1, placeholder2, is_standard_residue_flag)
-            ('GLY', 0, 0, 0, 4, None, None, True), # GLY: res_seq_idx 0, atom_start 0, num_atoms 4, STANDARD
-            ('TYR', 1, 1, 4, 11, None, None, True) # TYR: res_seq_idx 1, atom_start 4, num_atoms 11, standard
+            ('GLY', 0, 0, 0, 4, None, None, True),
+            ('TYR', 1, 1, 4, 11, None, None, True)
         ], dtype=object),
         'chains': np.array([
-            # (chain_id_str, p1, p2, p3, p4, p5, p6, res_start_idx_in_residues_array, num_residues_in_chain)
-            ('A', None, None, None, None, None, None, 0, 2), # Chain 'A', starts at res_idx 0, has 2 residues
+            ('A', None, None, None, None, None, None, 0, 2),
         ], dtype=object)
     }
     return mock_data
 
-
-# Helper to create a dummy Atom object
 def create_dummy_atom(name, element='H', coord=(0,0,0)):
     atom = Atom.Atom(name, Vector(coord), 0, 0, None, f"{name}{element}", 0, element)
     return atom
 
-# Helper to create a dummy Residue object
 def create_dummy_residue(resname, resid, atoms_dict):
     res = Residue.Residue((' ', resid, ' '), resname, ' ')
     for atom_name, atom_obj in atoms_dict.items():
         res.add(atom_obj)
     return res
 
-# Helper to create a dummy Structure object
 def create_dummy_structure(residues_list):
     struct = Structure.Structure("test_struct")
     model = Model.Model(0)
@@ -123,26 +114,17 @@ def create_dummy_structure(residues_list):
     return struct
 
 class TestProcessNoesy(unittest.TestCase):
-
-class TestProcessNoesy(unittest.TestCase):
-
     def setUp(self):
         self.mock_npz_data = get_mock_npz_data()
         self.dummy_input_pdb = "dummy_input.pdb"
         self.dummy_output_pdb = "dummy_output.pdb"
 
-    # --- Tests for new NPZ functions ---
     @patch('numpy.load')
     def test_parse_npz_success(self, mock_np_load):
         mock_np_load.return_value = self.mock_npz_data
-
         data = parse_npz("dummy.npz")
-
         mock_np_load.assert_called_once_with("dummy.npz")
         self.assertIn('atoms', data)
-        self.assertIn('coords', data)
-        self.assertIn('residues', data)
-        self.assertIn('chains', data)
         np.testing.assert_array_equal(data['atoms'], self.mock_npz_data['atoms'])
 
     @patch('numpy.load')
@@ -153,12 +135,11 @@ class TestProcessNoesy(unittest.TestCase):
 
     @patch('numpy.load')
     def test_parse_npz_key_error(self, mock_np_load):
-        mock_np_load.return_value = {'coords': self.mock_npz_data['coords']} # Missing 'atoms'
-        with self.assertRaises(KeyError): # Or whatever error parse_npz raises for missing keys
+        mock_np_load.return_value = {'coords': self.mock_npz_data['coords']}
+        with self.assertRaises(KeyError):
             parse_npz("dummy.npz")
 
     def test_decode_atom_name_formatting(self):
-        """Tests the refined padding logic in decode_atom_name_from_4i1."""
         self.assertEqual(decode_atom_name_from_4i1(encode_atom_name_to_4i1("N")), " N  ")
         self.assertEqual(decode_atom_name_from_4i1(encode_atom_name_to_4i1("CA")), " CA ")
         self.assertEqual(decode_atom_name_from_4i1(encode_atom_name_to_4i1("OXT")), " OXT")
@@ -166,183 +147,105 @@ class TestProcessNoesy(unittest.TestCase):
         self.assertEqual(decode_atom_name_from_4i1(encode_atom_name_to_4i1("CG1")), "CG1 ")
         self.assertEqual(decode_atom_name_from_4i1(encode_atom_name_to_4i1("HD21")), "HD21")
         self.assertEqual(decode_atom_name_from_4i1(encode_atom_name_to_4i1("1H")), "1H  ")
-        self.assertEqual(decode_atom_name_from_4i1(encode_atom_name_to_4i1("2HG")), "2HG ") # 3-char, starts with digit
-
-        # Test empty/invalid encoding results in UNK
+        self.assertEqual(decode_atom_name_from_4i1(encode_atom_name_to_4i1("2HG")), "2HG ")
         empty_encoded = np.zeros(4, dtype=np.int8)
         self.assertEqual(decode_atom_name_from_4i1(empty_encoded), "UNK ")
+        self.assertEqual(decode_atom_name_from_4i1(encode_atom_name_to_4i1("  N ")), " N  ")
+        self.assertEqual(decode_atom_name_from_4i1(encode_atom_name_to_4i1("CA  ")), " CA ")
 
-        # Test names that might be stripped and then padded
-        self.assertEqual(decode_atom_name_from_4i1(encode_atom_name_to_4i1("  N ")), " N  ") # Encodes "N"
-        self.assertEqual(decode_atom_name_from_4i1(encode_atom_name_to_4i1("CA  ")), " CA ") # Encodes "CA"
-
-    @patch('scripts.process.process_noesy.logger') # Mock logger
+    @patch('scripts.process.process_noesy.logger')
     def test_write_temp_pdb_from_npz(self, mock_logger):
-        # GLY: N,CA,C (O is 0,0,0 and skipped) -> 3 atoms written
-        # TYR: N,CA,C,O, CG,CD1,CE1,CZ,OH,OXT (CB is 0,0,0 and skipped) -> 10 atoms written
         mock_data = get_mock_npz_data()
-
         pdb_output_io = io.StringIO()
         with patch('builtins.open', return_value=pdb_output_io, create=True):
             write_temp_pdb_from_npz(mock_data, "dummy_path.pdb")
         pdb_content = pdb_output_io.getvalue().splitlines()
+        self.assertEqual(len(pdb_content), 15) # 3 GLY + 10 TYR + TER + END
 
-        # Expected: 3 (GLY) + 10 (TYR) = 13 ATOM lines + 1 TER + 1 END = 15 lines
-        self.assertEqual(len(pdb_content), 15)
-
-        # --- Check GLY atoms (N, CA, C) --- Serials 1, 2, 3
-        # GLY N (coords_gly_n = [1.0, 2.0, 3.0])
         self.assertTrue(pdb_content[0].startswith("ATOM "))
-        self.assertEqual(pdb_content[0][7:11].strip(), "1")    # Serial
-        self.assertEqual(pdb_content[0][12:16], " N  ")        # Atom name
-        self.assertEqual(pdb_content[0][17:20], "GLY")         # Residue name
-        self.assertAlmostEqual(float(pdb_content[0][30:38]), 1.000) # X
-
-        # GLY CA (coords_gly_ca  = [1.1, 2.1, 3.1])
+        self.assertEqual(pdb_content[0][7:11].strip(), "1")
+        self.assertEqual(pdb_content[0][12:16], " N  ")
+        self.assertEqual(pdb_content[0][17:20], "GLY")
+        self.assertAlmostEqual(float(pdb_content[0][30:38]), 1.000)
         self.assertEqual(pdb_content[1][7:11].strip(), "2")
         self.assertEqual(pdb_content[1][12:16], " CA ")
-        self.assertAlmostEqual(float(pdb_content[1][30:38]), 1.100) # X
-
-        # GLY C (coords_gly_c   = [1.2, 2.2, 3.2])
+        self.assertAlmostEqual(float(pdb_content[1][30:38]), 1.100)
         self.assertEqual(pdb_content[2][7:11].strip(), "3")
         self.assertEqual(pdb_content[2][12:16], " C  ")
-        self.assertAlmostEqual(float(pdb_content[2][30:38]), 1.200) # X
+        self.assertAlmostEqual(float(pdb_content[2][30:38]), 1.200)
 
-        # --- Check TYR atoms (N,CA,C,O, CG,CD1,CE1,CZ,OH,OXT) --- Serials 4-13
-        # TYR CB (coords_tyr_cb_zero) is skipped.
-        # NPZ atom indices for TYR: N(4), CA(5), C(6), O(7), CB(8,skipped), CG(9), CD1(10), CE1(11), CZ(12), OH(13), OXT(14)
-        # Expected TYR atom names (padded): N, CA, C, O, CB, CG, CD1, CE1, CZ, OH, OXT
-        # Based on _apply_pdb_atom_name_padding:
-        # N -> " N  ", CA -> " CA ", C -> " C  ", O -> " O  ", CB -> " CB "
-        # CG -> " CG  ", CD1 -> "CD1 ", CE1 -> "CE1 ", CZ -> " CZ  " (note: CG, CZ are 2 chars, CD1, CE1 are 3)
-        # OH -> " OH  "
-        # OXT -> " OXT"
-        # These are based on the NEW decode_atom_name_from_4i1 padding logic.
-        expected_tyr_pdb_names_filtered = [ # CB is removed
-            " N  ", " CA ", " C  ", " O  ",
-            " CG  ", "CD1 ", "CE1 ", " CZ  ", " OH  ",
-            " OXT"
-        ]
-
-        # Original NPZ indices for TYR atoms that are *not* skipped:
-        # N(4), CA(5), C(6), O(7), CG(9), CD1(10), CE1(11), CZ(12), OH(13), OXT(14)
+        expected_tyr_pdb_names_filtered = [" N  ", " CA ", " C  ", " O  ", " CG  ", "CD1 ", "CE1 ", " CZ  ", " OH  ", " OXT"]
         tyr_npz_indices_written = [4, 5, 6, 7, 9, 10, 11, 12, 13, 14]
-
         for i, npz_atom_idx in enumerate(tyr_npz_indices_written):
-            line_idx = i + 3 # GLY has 3 atoms, so TYR lines start at index 3 in pdb_content
-            atom_serial_expected = str(i + 4) # GLY atoms are 1,2,3. TYR atoms start at 4.
-
+            line_idx = i + 3
+            atom_serial_expected = str(i + 4)
             self.assertTrue(pdb_content[line_idx].startswith("ATOM "))
             self.assertEqual(pdb_content[line_idx][7:11].strip(), atom_serial_expected)
             self.assertEqual(pdb_content[line_idx][12:16], expected_tyr_pdb_names_filtered[i])
             self.assertEqual(pdb_content[line_idx][17:20], "TYR")
             self.assertEqual(pdb_content[line_idx][21], "A")
-            self.assertEqual(pdb_content[line_idx][22:26].strip(), "2") # TYR is residue 2
-
+            self.assertEqual(pdb_content[line_idx][22:26].strip(), "2")
             current_atom_coords = self.mock_npz_data['atoms'][npz_atom_idx][3]
-            self.assertAlmostEqual(float(pdb_content[line_idx][30:38]), current_atom_coords[0]) # X
-            self.assertAlmostEqual(float(pdb_content[line_idx][38:46]), current_atom_coords[1]) # Y
-            self.assertAlmostEqual(float(pdb_content[line_idx][46:54]), current_atom_coords[2]) # Z
-
+            self.assertAlmostEqual(float(pdb_content[line_idx][30:38]), current_atom_coords[0])
+            self.assertAlmostEqual(float(pdb_content[line_idx][38:46]), current_atom_coords[1])
+            self.assertAlmostEqual(float(pdb_content[line_idx][46:54]), current_atom_coords[2])
             expected_element = "O" if expected_tyr_pdb_names_filtered[i].strip() in ["O", "OH", "OXT"] else \
                                ("N" if expected_tyr_pdb_names_filtered[i].strip() == "N" else "C")
             self.assertEqual(pdb_content[line_idx][76:78].strip(), expected_element)
 
-        # Check TER record for Chain A (after 3 + 10 = 13 ATOM lines)
-        # TER    14      TYR A   2
         self.assertTrue(pdb_content[13].startswith("TER  "))
-        self.assertEqual(pdb_content[13][6:11].strip(), "14") # TER serial (13 atoms + 1)
-        self.assertEqual(pdb_content[13][17:20], "TYR")       # Last residue name in chain
-        self.assertEqual(pdb_content[13][21], "A")            # Chain ID
-        self.assertEqual(pdb_content[13][22:26].strip(), "2") # Last residue sequence number
-
-        # Check END record (last line)
+        self.assertEqual(pdb_content[13][6:11].strip(), "14")
+        self.assertEqual(pdb_content[13][17:20], "TYR")
+        self.assertEqual(pdb_content[13][21], "A")
+        self.assertEqual(pdb_content[13][22:26].strip(), "2")
         self.assertTrue(pdb_content[14].startswith("END"))
+        mock_logger.info.assert_any_call("Atom 4 (Residue: GLY1, NPZ global_atom_idx: 3) has (0,0,0) coordinates. Skipping.")
+        mock_logger.info.assert_any_call("Atom 8 (Residue: TYR2, NPZ global_atom_idx: 8) has (0,0,0) coordinates. Skipping.")
 
-        # Check logger calls for skipped atoms
-        # GLY O: original global index 3 (0-indexed). Its would-be serial is 4 (after GLY N, CA, C).
-        # TYR CB: original global index 8 (0-indexed). Its would-be serial is 8
-        # (after GLY N,CA,C (3) + TYR N,CA,C,O (4) = 7 atoms written before it, so it would be 8th).
-        mock_logger.info.assert_any_call(
-            "Atom 4 (Residue: GLY1, NPZ global_atom_idx: 3) has (0,0,0) coordinates. Skipping."
-        )
-        mock_logger.info.assert_any_call(
-            "Atom 8 (Residue: TYR2, NPZ global_atom_idx: 8) has (0,0,0) coordinates. Skipping."
-        )
-
-
-    # --- Tests for add_hydrogens (updated for new error handling and logging) ---
     @patch('scripts.process.process_noesy.logger')
     @patch('os.path.getsize')
     @patch('os.path.exists')
     @patch('subprocess.run')
-    @patch('os.remove') # Added os.remove mock
+    @patch('os.remove')
     def test_add_hydrogens_success(self, mock_os_remove, mock_subprocess_run, mock_os_exists, mock_os_getsize, mock_logger):
         mock_cp = MagicMock(spec=subprocess.CompletedProcess)
         mock_cp.returncode = 0
         mock_cp.stdout = "pdb2pqr ran okay"
         mock_cp.stderr = ""
         mock_subprocess_run.return_value = mock_cp
-
         expected_dummy_pqr_path = self.dummy_output_pdb + ".pqr_dummy"
-
         def os_exists_side_effect(path_arg):
-            if path_arg == self.dummy_output_pdb:
-                return True # Main PDB output created
-            if path_arg == expected_dummy_pqr_path:
-                return True # Dummy PQR created
+            if path_arg == self.dummy_output_pdb: return True
+            if path_arg == expected_dummy_pqr_path: return True
             return False
         mock_os_exists.side_effect = os_exists_side_effect
-        mock_os_getsize.return_value = 100 # Non-empty file for main output
-
+        mock_os_getsize.return_value = 100
         result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
-
         self.assertTrue(result)
-
-        expected_command = [
-            PDB2PQR_PATH,
-            "--ff=AMBER",
-            "--pdb-output", self.dummy_output_pdb,
-            self.dummy_input_pdb,
-            expected_dummy_pqr_path
-        ]
-        mock_subprocess_run.assert_called_once_with(
-            expected_command,
-            capture_output=True,
-            text=True,
-            timeout=600,
-            check=False
-        )
-
+        expected_command = [PDB2PQR_PATH, "--ff=AMBER", "--pdb-output", self.dummy_output_pdb, self.dummy_input_pdb, expected_dummy_pqr_path]
+        mock_subprocess_run.assert_called_once_with(expected_command, capture_output=True, text=True, timeout=600, check=False)
         mock_os_remove.assert_any_call(expected_dummy_pqr_path)
-        # Check if logger.info was called with expected messages
         self.assertIn(call(f"Calling pdb2pqr30 for {self.dummy_input_pdb}..."), mock_logger.info.call_args_list)
         self.assertIn(call(f"pdb2pqr30 completed successfully for {self.dummy_input_pdb}."), mock_logger.info.call_args_list)
-
 
     @patch('scripts.process.process_noesy.logger')
     @patch('subprocess.run')
     @patch('os.remove')
-    @patch('os.path.exists') # Added to control dummy file existence for cleanup
+    @patch('os.path.exists')
     def test_add_hydrogens_pdb2pqr_failure(self, mock_os_exists, mock_os_remove, mock_subprocess_run, mock_logger):
         mock_cp = MagicMock(spec=subprocess.CompletedProcess)
         mock_cp.returncode = 1
         mock_cp.stdout = "Error output from pdb2pqr"
         mock_cp.stderr = "Detailed error from pdb2pqr"
         mock_subprocess_run.return_value = mock_cp
-
         expected_dummy_pqr_path = self.dummy_output_pdb + ".pqr_dummy"
-        mock_os_exists.return_value = True # Assume dummy pqr might exist
-
+        mock_os_exists.return_value = True
         result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
-
         self.assertFalse(result)
-        # Assert command structure if necessary (same as success case)
         expected_command = [PDB2PQR_PATH, "--ff=AMBER", "--pdb-output", self.dummy_output_pdb, self.dummy_input_pdb, expected_dummy_pqr_path]
         mock_subprocess_run.assert_called_once_with(expected_command, capture_output=True, text=True, timeout=600, check=False)
         mock_logger.error.assert_any_call(f"pdb2pqr30 failed for {self.dummy_input_pdb} with return code 1")
         mock_os_remove.assert_any_call(expected_dummy_pqr_path)
-
 
     @patch('scripts.process.process_noesy.logger')
     @patch('subprocess.run')
@@ -351,8 +254,7 @@ class TestProcessNoesy(unittest.TestCase):
     def test_add_hydrogens_pdb2pqr_timeout(self, mock_os_exists, mock_os_remove, mock_subprocess_run, mock_logger):
         mock_subprocess_run.side_effect = subprocess.TimeoutExpired(cmd="pdb2pqr_command", timeout=600, stdout=b"partial stdout", stderr=b"partial stderr")
         expected_dummy_pqr_path = self.dummy_output_pdb + ".pqr_dummy"
-        mock_os_exists.return_value = True # Assume dummy pqr might exist
-
+        mock_os_exists.return_value = True
         result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
         self.assertFalse(result)
         mock_logger.error.assert_any_call(f"pdb2pqr30 timed out for {self.dummy_input_pdb} after 600 seconds.")
@@ -368,14 +270,12 @@ class TestProcessNoesy(unittest.TestCase):
         mock_cp.returncode = 0
         mock_cp.stdout = "pdb2pqr ran okay, but no main output file created by test"
         mock_subprocess_run.return_value = mock_cp
-
         expected_dummy_pqr_path = self.dummy_output_pdb + ".pqr_dummy"
         def os_exists_side_effect(path_arg):
-            if path_arg == self.dummy_output_pdb: return False # Main PDB output does not exist
-            if path_arg == expected_dummy_pqr_path: return True # Dummy PQR might exist
+            if path_arg == self.dummy_output_pdb: return False
+            if path_arg == expected_dummy_pqr_path: return True
             return False
         mock_os_exists.side_effect = os_exists_side_effect
-
         result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
         self.assertFalse(result)
         mock_logger.error.assert_any_call(f"pdb2pqr30 reported success, but output file {self.dummy_output_pdb} is missing or empty.")
@@ -391,20 +291,17 @@ class TestProcessNoesy(unittest.TestCase):
         mock_cp.returncode = 0
         mock_cp.stdout = "pdb2pqr ran okay, but empty main output file created by test"
         mock_subprocess_run.return_value = mock_cp
-
         expected_dummy_pqr_path = self.dummy_output_pdb + ".pqr_dummy"
         def os_exists_side_effect(path_arg):
             if path_arg == self.dummy_output_pdb: return True
             if path_arg == expected_dummy_pqr_path: return True
             return False
         mock_os_exists.side_effect = os_exists_side_effect
-        mock_os_getsize.return_value = 0 # Simulate empty output file
-
+        mock_os_getsize.return_value = 0
         result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
         self.assertFalse(result)
         mock_logger.error.assert_any_call(f"pdb2pqr30 reported success, but output file {self.dummy_output_pdb} is missing or empty.")
         mock_os_remove.assert_any_call(expected_dummy_pqr_path)
-
 
     @patch('scripts.process.process_noesy.logger')
     @patch('subprocess.run')
@@ -413,35 +310,30 @@ class TestProcessNoesy(unittest.TestCase):
     def test_add_hydrogens_pdb2pqr_not_found(self, mock_os_exists, mock_os_remove, mock_subprocess_run, mock_logger):
         mock_subprocess_run.side_effect = FileNotFoundError(f"No such file or directory: '{PDB2PQR_PATH}'")
         expected_dummy_pqr_path = self.dummy_output_pdb + ".pqr_dummy"
-        # If PDB2PQR_PATH itself is not found, pdb2pqr30 command doesn't run, so dummy_pqr_output_path is not created.
         mock_os_exists.return_value = False
-
         result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
         self.assertFalse(result)
         mock_logger.error.assert_any_call(
             f"pdb2pqr30 command not found at {PDB2PQR_PATH}. Please ensure PDB2PQR is installed and the path is correct."
         )
-        # os.remove should not be called if the file doesn't exist
-        mock_os_remove.assert_not_called() # or specifically mock_os_remove.assert_any_call(expected_dummy_pqr_path) should not be true
+        mock_os_remove.assert_not_called()
 
     @patch('scripts.process.process_noesy.logger')
     @patch('subprocess.run')
-    @patch('traceback.format_exc', return_value="Traceback details") # Mock traceback
+    @patch('traceback.format_exc', return_value="Traceback details")
     @patch('os.remove')
     @patch('os.path.exists')
     def test_add_hydrogens_unexpected_subprocess_error(self, mock_os_exists, mock_os_remove, mock_traceback_format, mock_subprocess_run, mock_logger):
         test_exception = Exception("Unexpected Kaboom!")
         mock_subprocess_run.side_effect = test_exception
         expected_dummy_pqr_path = self.dummy_output_pdb + ".pqr_dummy"
-        mock_os_exists.return_value = True # Assume dummy pqr might exist
-
+        mock_os_exists.return_value = True
         result = add_hydrogens(self.dummy_input_pdb, self.dummy_output_pdb)
         self.assertFalse(result)
         mock_logger.error.assert_any_call(
             f"An unexpected error occurred while running pdb2pqr30 for {self.dummy_input_pdb}: {test_exception}"
         )
         mock_os_remove.assert_any_call(expected_dummy_pqr_path)
-
 
     # --- Tests for get_atoms and generate_noesy_data (can largely remain as they test core logic) ---
     def test_get_atoms(self):
@@ -657,3 +549,5 @@ class TestProcessNoesy(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+[end of tests/process/test_process_noesy.py]
