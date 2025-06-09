@@ -528,10 +528,15 @@ def get_atoms(structure):
         for chain in model:
             for residue in chain:
                 res_name = residue.get_resname()
-                # Skip non-standard residues or those not in our list
-                if res_name not in RELEVANT_ATOMS and res_name != 'GLY': # GLY handled by backbone H
-                    # Could add a check for common modified residues if needed
+
+                allowed_residues = {"ILE", "LEU", "VAL"}
+                if res_name not in allowed_residues:
                     continue
+
+                # The old filter below is now superseded by the allowed_residues check for ILE, LEU, VAL.
+                # if res_name not in RELEVANT_ATOMS and res_name != 'GLY': # GLY handled by backbone H
+                #     # Could add a check for common modified residues if needed
+                #     continue
 
                 for atom in residue:
                     atom_name = atom.get_name()
