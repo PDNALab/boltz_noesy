@@ -605,7 +605,7 @@ def generate_noesy_data(pdb_file_with_hydrogens, distance_cutoff=5.0):
                 atom1_name = atom1.get_name()
                 atom2_name = atom2.get_name()
 
-                noesy_lines.append(f"{res1_id} {res2_id} {peak_id_counter} {distance:.2f} {atom1_name} {atom2_name}")
+                noesy_lines.append(f"{res1_id} {res2_id} {peak_id_counter} {distance:.2f} {atom1_name} {atom2_name} 1") # Added " 1" for true peak
                 peak_id_counter += 1
 
     # Introduce noise: For ~10% of `residueFrom` entries, add 1-2 incorrect `residueTo` options
@@ -662,7 +662,7 @@ def generate_noesy_data(pdb_file_with_hydrogens, distance_cutoff=5.0):
             # Generate a slightly perturbed distance
             noisy_distance = min(6.0, max(1.8, original_distance + random.uniform(-1.0, 1.0))) # Ensure distance is somewhat realistic and capped
 
-            noisy_lines.append(f"{res_from} {incorrect_res_to_candidate} {original_peak_id} {noisy_distance:.2f} {atom_from} {incorrect_atom_to}")
+            noisy_lines.append(f"{res_from} {incorrect_res_to_candidate} {original_peak_id} {noisy_distance:.2f} {atom_from} {incorrect_atom_to} 0") # Added " 0" for noisy peak
             # Note: This might create duplicate peak IDs for the *same* res_from, atom_from but different res_to. This is intended to model ambiguity.
 
     return noisy_lines
