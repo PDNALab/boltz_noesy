@@ -529,7 +529,7 @@ def get_atoms(structure):
             for residue in chain:
                 res_name = residue.get_resname()
 
-                allowed_residues = {"ILE", "LEU", "VAL"}
+                allowed_residues = {"ALA", "ILE", "LEU", "MET", "PHE", "PRO", "TRP", "VAL"}
                 if res_name not in allowed_residues:
                     continue
 
