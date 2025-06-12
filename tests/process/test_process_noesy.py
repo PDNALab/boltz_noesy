@@ -357,22 +357,75 @@ class TestProcessNoesyMain(unittest.TestCase):
             actual_noe_distance_threshold=DISTANCE_NOE_THRESHOLD # Global constant
         )
 
-        # Check output file
-        expected_output_filename = os.path.join(self.test_output_dir, f"{self.npz_filename.replace('.npz', '.txt')}")
+        # Check output file (now NPZ)
+        name_part_npz = self.npz_filename.replace('.npz', '')
+        expected_output_filename = os.path.join(self.test_output_dir, f"{name_part_npz}.npz")
         self.assertTrue(os.path.exists(expected_output_filename))
-        with open(expected_output_filename, 'r') as f:
-            output_content = f.read()
 
-        expected_header = "ChainID\tRes1_Num\tRes2_Num\tPeak_Type\tDistance\tAtom1_Name\tAtom2_Name\n"
-        expected_data_line = "A\t1\t2\t1\t3.50\tH\tHB1\n"
-        self.assertEqual(output_content, expected_header + expected_data_line)
+        loaded_npz = np.load(expected_output_filename)
+        self.assertIn('noesy_data', loaded_npz)
+        loaded_data = loaded_npz['noesy_data']
+
+        # Define the same dtype used in main script for constructing the expected array
+        noesy_contact_dtype = np.dtype([
+            ('chain_id', 'U1'), ('res1_num', np.int32), ('res2_num', np.int32),
+            ('peak_type', np.int8), ('distance', np.float32),
+            ('atom1_name', 'U4'), ('atom2_name', 'U4')
+        ])
+
+        expected_data_tuples = []
+        for cd in contacts_computed: # contacts_computed is the mock return value
+            expected_data_tuples.append((
+                str(cd['chain_id'])[:1],       # Ensure U1
+                cd['res1_num'],
+                cd['res2_num'],
+                cd['peak_type'],
+                cd['distance'],                # Will be cast to float32
+                str(cd['atom1_name'])[:4],     # Ensure U4
+                str(cd['atom2_name'])[:4]      # Ensure U4
+            ))
+        expected_np_array = np.array(expected_data_tuples, dtype=noesy_contact_dtype)
+        np.testing.assert_array_equal(loaded_data, expected_np_array)
 
         # Check debug PDB copy
-        expected_debug_pdb = os.path.join(self.test_output_dir, "test_protein_debug_initial.pdb")
+        expected_debug_pdb = os.path.join(self.test_output_dir, f"{name_part_npz}_debug_initial.pdb")
         self.assertTrue(os.path.exists(expected_debug_pdb))
 
         # Check for relevant log messages
-        mock_logger.info.assert_any_call(f"Generated 1 contacts for {self.npz_filename.replace('.npz', '')} at {expected_output_filename}")
+        mock_logger.info.assert_any_call(f"Saved {len(contacts_computed)} contacts for {name_part_npz} to NPZ file: {expected_output_filename}")
+
+    @patch('scripts.process.process_noesy.add_hydrogens')
+    @patch('Bio.PDB.PDBParser.get_structure')
+    @patch('scripts.process.process_noesy.extract_filtered_protons')
+    @patch('scripts.process.process_noesy.compute_contacts_new_method')
+    @patch('scripts.process.process_noesy.logger')
+    @patch('numpy.savez_compressed') # Mock this to prevent actual file writing if something goes wrong with mocks
+    def test_main_no_contacts_generated(self, mock_np_savez, mock_logger, mock_compute_contacts, mock_extract_protons, mock_get_structure, mock_add_hydrogens):
+        # --- Mocks Setup ---
+        mock_add_hydrogens.return_value = True
+        mock_get_structure.return_value = create_test_structure({'A': []}) # Dummy structure
+        mock_extract_protons.return_value = [{'coord': np.array([1.0,2.0,3.0])}] # Dummy protons
+        mock_compute_contacts.return_value = [] # No contacts
+
+        # --- Run main ---
+        test_args = argparse.Namespace(
+            input_dir=self.test_input_dir,
+            output_dir=self.test_output_dir,
+            distance_cutoff=7.5
+        )
+        with patch('argparse.ArgumentParser.parse_args', return_value=test_args):
+            process_noesy_main()
+
+        # --- Assertions ---
+        name_part_npz = self.npz_filename.replace('.npz', '')
+        expected_output_npz_filename = os.path.join(self.test_output_dir, f"{name_part_npz}.npz")
+
+        # Ensure NPZ file was NOT saved
+        mock_np_savez.assert_not_called()
+        self.assertFalse(os.path.exists(expected_output_npz_filename)) # Also check file system just in case
+
+        # Check for the specific log message
+        mock_logger.info.assert_any_call(f"No contacts generated for {name_part_npz}, so no NPZ file will be saved.")
 
 
 if __name__ == '__main__':

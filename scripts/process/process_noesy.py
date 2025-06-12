@@ -257,6 +257,16 @@ def main():
 
     pdb_parser = PDBParser(QUIET=True)
 
+    noesy_contact_dtype = np.dtype([
+        ('chain_id', 'U1'),       # Single character for chain
+        ('res1_num', np.int32),   # Residue number 1
+        ('res2_num', np.int32),   # Residue number 2
+        ('peak_type', np.int8),   # 0 or 1
+        ('distance', np.float32), # Distance
+        ('atom1_name', 'U4'),     # Atom name (max 4 chars, e.g. "HD11")
+        ('atom2_name', 'U4')      # Atom name (max 4 chars)
+    ])
+
     for npz_filename in npz_files:
         npz_file_path = os.path.join(args.input_dir, npz_filename)
         name_part_npz, _ = os.path.splitext(npz_filename)
@@ -295,17 +305,34 @@ def main():
                                                    actual_noe_distance_threshold=DISTANCE_NOE_THRESHOLD)
 
             if contacts:
-                output_filename = os.path.join(args.output_dir, f"{name_part_npz}.txt")
-                with open(output_filename, "w") as f_out:
-                    f_out.write("ChainID\tRes1_Num\tRes2_Num\tPeak_Type\tDistance\tAtom1_Name\tAtom2_Name\n") # Header
-                    for c_dict in contacts:
-                        line = (f"{c_dict['chain_id']}\t{c_dict['res1_num']}\t"
-                                f"{c_dict['res2_num']}\t{c_dict['peak_type']}\t"
-                                f"{c_dict['distance']:.2f}\t{c_dict['atom1_name']}\t"
-                                f"{c_dict['atom2_name']}\n")
-                        f_out.write(line)
-                logger.info(f"Generated {len(contacts)} contacts for {name_part_npz} at {output_filename}")
-            else: logger.info(f"No contacts generated for {name_part_npz}.")
+                output_filename = os.path.join(args.output_dir, f"{name_part_npz}.npz")
+                contact_data_tuples = [] # Changed variable name for clarity
+                for contact_dict in contacts:
+                    # Ensure atom names are correctly sized for U4 dtype
+                    atom1 = str(contact_dict['atom1_name'])[:4]
+                    atom2 = str(contact_dict['atom2_name'])[:4]
+                    chain_id_str = str(contact_dict['chain_id'])[:1] # Ensure single char for U1
+
+                    contact_data_tuples.append((
+                        chain_id_str,
+                        contact_dict['res1_num'],
+                        contact_dict['res2_num'],
+                        contact_dict['peak_type'],
+                        contact_dict['distance'], # np.array will cast to float32
+                        atom1,
+                        atom2
+                    ))
+
+                np_contact_data = np.array(contact_data_tuples, dtype=noesy_contact_dtype) # Use the new structured dtype
+
+                try:
+                    np.savez_compressed(output_filename, noesy_data=np_contact_data)
+                    logger.info(f"Saved {len(contacts)} contacts for {name_part_npz} to NPZ file: {output_filename}")
+                except Exception as e_save:
+                    logger.error(f"Failed to save NPZ file {output_filename}: {e_save}", exc_info=True)
+
+            else:
+                logger.info(f"No contacts generated for {name_part_npz}, so no NPZ file will be saved.")
         except Exception as e:
             logger.error(f"Error processing file {npz_file_path}: {e}", exc_info=True)
         finally:
