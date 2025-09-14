@@ -22,6 +22,7 @@ from boltz.data.types import (
     MSADeletion,
     MSAResidue,
     MSASequence,
+    NOESY,
     Tokenized,
 )
 from boltz.model.modules.utils import center_random_augmentation
@@ -971,6 +972,89 @@ def process_msa_features(
     }
 
 
+def process_noesy_features(
+    data: Tokenized,
+    max_tokens: Optional[int] = None,
+) -> dict[str, Tensor]:
+    """Get the NOESY features.
+    Parameters
+    ----------
+    data : Tokenized
+        The tokenized data.
+    max_tokens : int, optional
+        The maximum number of tokens.
+    Returns
+    -------
+    dict[str, Tensor]
+        The NOESY features.
+    """
+    num_tokens = len(data.tokens)
+    noesy_features = torch.zeros(num_tokens, num_tokens, 3)
+
+    # Process CA-CA distances
+    ca_coords = []
+    for token in data.tokens:
+        if token["mol_type"] == const.chain_type_ids["PROTEIN"]:
+            res_type_idx = token["res_type"]
+            # Check if res_type_idx is within the valid range for const.tokens
+            if 0 <= res_type_idx < len(const.tokens):
+                res_type = const.tokens[res_type_idx]
+                if res_type in const.ref_atoms:
+                    # Check if 'CA' is in the list of reference atoms for the residue type
+                    if "CA" in const.ref_atoms[res_type]:
+                        ca_idx_in_res = const.ref_atoms[res_type].index("CA")
+                        atom_idx = token["atom_idx"] + ca_idx_in_res
+                        # Check if atom_idx is within the valid range for data.structure.atoms
+                        if 0 <= atom_idx < len(data.structure.atoms):
+                            ca_coords.append(data.structure.atoms[atom_idx]["coords"])
+                        else:
+                            ca_coords.append(np.full(3, np.nan))
+                    else:
+                        ca_coords.append(np.full(3, np.nan))
+                else:
+                    ca_coords.append(np.full(3, np.nan))
+            else:
+                ca_coords.append(np.full(3, np.nan))
+        else:
+            ca_coords.append(np.full(3, np.nan))
+
+    ca_coords = np.array(ca_coords)
+    # Check for NaNs and replace them with a large value to avoid issues with cdist
+    ca_coords[np.isnan(ca_coords)] = 1e6
+    ca_dists = torch.cdist(torch.from_numpy(ca_coords), torch.from_numpy(ca_coords))
+    ca_dists[ca_dists > 8.0] = 0.0
+
+    # Bin the distances
+    boundaries = torch.linspace(0.0, 8.0, 15)
+    ca_dist_bins = (ca_dists.unsqueeze(-1) > boundaries).sum(dim=-1).long()
+
+    noesy_features[:, :, 0] = ca_dist_bins
+
+    # Process NOESY restraints
+    if data.noesy is not None:
+        for restraint in data.noesy.restraints:
+            res1_idx = restraint["res_1"]
+            res2_idx = restraint["res_2"]
+            dist = restraint["dist"]
+            is_true = restraint["is_true"]
+
+            # Bin the noesy distance
+            dist_bin = (dist > boundaries).sum().long()
+
+            noesy_features[res1_idx, res2_idx, 1] = dist_bin
+            noesy_features[res2_idx, res1_idx, 1] = dist_bin
+            noesy_features[res1_idx, res2_idx, 2] = is_true
+            noesy_features[res2_idx, res1_idx, 2] = is_true
+
+    if max_tokens is not None:
+        pad_len = max_tokens - num_tokens
+        if pad_len > 0:
+            noesy_features = pad_dim(noesy_features, 0, pad_len)
+            noesy_features = pad_dim(noesy_features, 1, pad_len)
+
+    return {"noesy_features": noesy_features}
+
+
 def process_symmetry_features(
     cropped: Tokenized, symmetries: dict
 ) -> dict[str, Tensor]:
@@ -1127,6 +1211,10 @@ def process_chain_feature_constraints(
 class BoltzFeaturizer:
     """Boltz featurizer."""
 
+    def __init__(self, no_msa: bool = False):
+        """Initialize the featurizer."""
+        self.no_msa = no_msa
+
     def process(
         self,
         data: Tokenized,
@@ -1200,13 +1288,24 @@ class BoltzFeaturizer:
         )
 
         # Compute MSA features
-        msa_features = process_msa_features(
-            data,
-            max_seqs_batch,
-            max_seqs,
-            max_tokens,
-            pad_to_max_seqs,
-        )
+        if self.no_msa:
+            msa_features = {}
+        else:
+            msa_features = process_msa_features(
+                data,
+                max_seqs_batch,
+                max_seqs,
+                max_tokens,
+                pad_to_max_seqs,
+            )
+
+        # Compute NOESY features
+        noesy_features = {}
+        if self.no_msa:
+            noesy_features = process_noesy_features(
+                data,
+                max_tokens,
+            )
 
         # Compute symmetry features
         symmetry_features = {}
@@ -1224,6 +1323,7 @@ class BoltzFeaturizer:
             **token_features,
             **atom_features,
             **msa_features,
+            **noesy_features,
             **symmetry_features,
             **residue_constraint_features,
             **chain_constraint_features,

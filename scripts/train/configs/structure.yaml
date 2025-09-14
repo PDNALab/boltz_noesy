@@ -23,7 +23,8 @@ data:
   datasets:
     - _target_: boltz.data.module.training.DatasetConfig
       target_dir: PATH_TO_TARGETS_DIR
-      msa_dir: PATH_TO_MSA_DIR
+      msa_dir: null
+      noesy_dir: PATH_TO_NOESY_DIR
       prob: 1.0
       sampler:
         _target_: boltz.data.sample.cluster.ClusterSampler
@@ -47,6 +48,7 @@ data:
     _target_: boltz.data.tokenize.boltz.BoltzTokenizer
   featurizer:
     _target_: boltz.data.feature.featurizer.BoltzFeaturizer
+    no_msa: true
 
   symmetries: PATH_TO_SYMMETRY_FILE
   max_tokens: 512

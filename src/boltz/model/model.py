@@ -189,6 +189,12 @@ class Boltz1(LightningModule):
                 s_input_dim=s_input_dim,
                 **msa_args,
             )
+        else:
+            self.noesy_module = nn.Sequential(
+                nn.Conv2d(3, token_z, kernel_size=1),
+                nn.ReLU(),
+                nn.Conv2d(token_z, token_z, kernel_size=1),
+            )
         self.pairformer_module = PairformerModule(token_s, token_z, **pairformer_args)
         if compile_pairformer:
             # Big models hit the default cache limit (8)
@@ -310,6 +316,9 @@ class Boltz1(LightningModule):
                     # Compute pairwise stack
                     if not self.no_msa:
                         z = z + self.msa_module(z, s_inputs, feats)
+                    else:
+                        noesy_feats = feats["noesy_features"].permute(0, 3, 1, 2)
+                        z = z + self.noesy_module(noesy_feats)
 
                     # Revert to uncompiled version for validation
                     if self.is_pairformer_compiled and not self.training:

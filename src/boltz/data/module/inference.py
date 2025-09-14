@@ -13,6 +13,7 @@ from boltz.data.feature.pad import pad_to_max
 from boltz.data.tokenize.boltz import BoltzTokenizer
 from boltz.data.types import (
     MSA,
+    NOESY,
     Connection,
     Input,
     Manifest,
@@ -27,6 +28,7 @@ def load_input(
     target_dir: Path,
     msa_dir: Path,
     constraints_dir: Optional[Path] = None,
+    noesy_dir: Optional[Path] = None,
 ) -> Input:
     """Load the given input data.
 
@@ -71,7 +73,15 @@ def load_input(
             constraints_dir / f"{record.id}.npz"
         )
 
-    return Input(structure, msas, residue_constraints=residue_constraints)
+    noesy = None
+    if noesy_dir is not None:
+        noesy_path = noesy_dir / f"{record.id}.npz"
+        if noesy_path.exists():
+            noesy = NOESY.load(noesy_path)
+
+    return Input(
+        structure, msas, noesy=noesy, residue_constraints=residue_constraints
+    )
 
 
 def collate(data: list[dict[str, Tensor]]) -> dict[str, Tensor]:
@@ -127,6 +137,8 @@ class PredictionDataset(torch.utils.data.Dataset):
         target_dir: Path,
         msa_dir: Path,
         constraints_dir: Optional[Path] = None,
+        noesy_dir: Optional[Path] = None,
+        no_msa: bool = False,
     ) -> None:
         """Initialize the training dataset.
 
@@ -145,8 +157,9 @@ class PredictionDataset(torch.utils.data.Dataset):
         self.target_dir = target_dir
         self.msa_dir = msa_dir
         self.constraints_dir = constraints_dir
+        self.noesy_dir = noesy_dir
         self.tokenizer = BoltzTokenizer()
-        self.featurizer = BoltzFeaturizer()
+        self.featurizer = BoltzFeaturizer(no_msa=no_msa)
 
     def __getitem__(self, idx: int) -> dict:
         """Get an item from the dataset.
@@ -167,6 +180,7 @@ class PredictionDataset(torch.utils.data.Dataset):
                 self.target_dir,
                 self.msa_dir,
                 self.constraints_dir,
+                self.noesy_dir,
             )
         except Exception as e:  # noqa: BLE001
             print(f"Failed to load input for {record.id} with error {e}. Skipping.")  # noqa: T201
@@ -230,6 +244,8 @@ class BoltzInferenceDataModule(pl.LightningDataModule):
         msa_dir: Path,
         num_workers: int,
         constraints_dir: Optional[Path] = None,
+        noesy_dir: Optional[Path] = None,
+        no_msa: bool = False,
     ) -> None:
         """Initialize the DataModule.
 
@@ -245,6 +261,8 @@ class BoltzInferenceDataModule(pl.LightningDataModule):
         self.target_dir = target_dir
         self.msa_dir = msa_dir
         self.constraints_dir = constraints_dir
+        self.noesy_dir = noesy_dir
+        self.no_msa = no_msa
 
     def predict_dataloader(self) -> DataLoader:
         """Get the training dataloader.
@@ -260,6 +278,8 @@ class BoltzInferenceDataModule(pl.LightningDataModule):
             target_dir=self.target_dir,
             msa_dir=self.msa_dir,
             constraints_dir=self.constraints_dir,
+            noesy_dir=self.noesy_dir,
+            no_msa=self.no_msa,
         )
         return DataLoader(
             dataset,

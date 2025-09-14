@@ -325,6 +325,26 @@ class MSA(NumpySerializable):
 
 
 ####################################################################################################
+# NOESY
+####################################################################################################
+
+
+NOESYRestraint = [
+    ("res_1", np.dtype("i4")),
+    ("res_2", np.dtype("i4")),
+    ("dist", np.dtype("f4")),
+    ("is_true", np.dtype("?")),
+]
+
+
+@dataclass(frozen=True)
+class NOESY(NumpySerializable):
+    """NOESY datatype."""
+
+    restraints: np.ndarray
+
+
+####################################################################################################
 # RECORD
 ####################################################################################################
 
@@ -500,6 +520,7 @@ class Input:
 
     structure: Structure
     msa: dict[str, MSA]
+    noesy: Optional[NOESY] = None
     record: Optional[Record] = None
     residue_constraints: Optional[ResidueConstraints] = None
 
@@ -541,4 +562,5 @@ class Tokenized:
     bonds: np.ndarray
     structure: Structure
     msa: dict[str, MSA]
+    noesy: Optional[NOESY] = None
     residue_constraints: Optional[ResidueConstraints] = None

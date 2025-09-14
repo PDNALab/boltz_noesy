@@ -15,7 +15,15 @@ from boltz.data.feature.symmetry import get_symmetries
 from boltz.data.filter.dynamic.filter import DynamicFilter
 from boltz.data.sample.sampler import Sample, Sampler
 from boltz.data.tokenize.tokenizer import Tokenizer
-from boltz.data.types import MSA, Connection, Input, Manifest, Record, Structure
+from boltz.data.types import (
+    MSA,
+    NOESY,
+    Connection,
+    Input,
+    Manifest,
+    Record,
+    Structure,
+)
 
 
 @dataclass
@@ -30,6 +38,7 @@ class DatasetConfig:
     filters: Optional[list] = None
     split: Optional[str] = None
     manifest_path: Optional[str] = None
+    noesy_dir: Optional[str] = None
 
 
 @dataclass
@@ -79,9 +88,12 @@ class Dataset:
     cropper: Cropper
     tokenizer: Tokenizer
     featurizer: BoltzFeaturizer
+    noesy_dir: Optional[Path] = None
 
 
-def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
+def load_input(
+    record: Record, target_dir: Path, msa_dir: Path, noesy_dir: Optional[Path] = None
+) -> Input:
     """Load the given input data.
 
     Parameters
@@ -92,6 +104,8 @@ def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
         The path to the data directory.
     msa_dir : Path
         The path to msa directory.
+    noesy_dir : Path, optional
+        The path to the noesy directory.
 
     Returns
     -------
@@ -123,7 +137,7 @@ def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
         atoms=structure["atoms"],
         bonds=structure["bonds"],
         residues=structure["residues"],
-        chains=chains, # chains var accounting for missing cyclic_period
+        chains=chains,  # chains var accounting for missing cyclic_period
         connections=structure["connections"].astype(Connection),
         interfaces=structure["interfaces"],
         mask=structure["mask"],
@@ -137,7 +151,13 @@ def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
             msa = np.load(msa_dir / f"{msa_id}.npz")
             msas[chain.chain_id] = MSA(**msa)
 
-    return Input(structure, msas)
+    noesy = None
+    if noesy_dir is not None:
+        noesy_path = noesy_dir / f"{record.id}.npz"
+        if noesy_path.exists():
+            noesy = NOESY.load(noesy_path)
+
+    return Input(structure, msas, noesy=noesy)
 
 
 def collate(data: list[dict[str, Tensor]]) -> dict[str, Tensor]:
@@ -263,7 +283,9 @@ class TrainingDataset(torch.utils.data.Dataset):
 
         # Get the structure
         try:
-            input_data = load_input(sample.record, dataset.target_dir, dataset.msa_dir)
+            input_data = load_input(
+                sample.record, dataset.target_dir, dataset.msa_dir, dataset.noesy_dir
+            )
         except Exception as e:
             print(
                 f"Failed to load input for {sample.record.id} with error {e}. Skipping."
@@ -411,7 +433,9 @@ class ValidationDataset(torch.utils.data.Dataset):
 
         # Get the structure
         try:
-            input_data = load_input(record, dataset.target_dir, dataset.msa_dir)
+            input_data = load_input(
+                record, dataset.target_dir, dataset.msa_dir, dataset.noesy_dir
+            )
         except Exception as e:
             print(f"Failed to load input for {record.id} with error {e}. Skipping.")
             return self.__getitem__(0)
@@ -516,6 +540,9 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
             # Set target_dir
             target_dir = Path(data_config.target_dir)
             msa_dir = Path(data_config.msa_dir)
+            noesy_dir = (
+                Path(data_config.noesy_dir) if data_config.noesy_dir is not None else None
+            )
 
             # Load manifest
             if data_config.manifest_path is not None:
@@ -566,6 +593,7 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
                     data_config.cropper,
                     cfg.tokenizer,
                     cfg.featurizer,
+                    noesy_dir,
                 )
             )
 
@@ -582,6 +610,7 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
                         data_config.cropper,
                         cfg.tokenizer,
                         cfg.featurizer,
+                        noesy_dir,
                     )
                 )
 

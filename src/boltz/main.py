@@ -37,6 +37,7 @@ class BoltzProcessedInput:
     targets_dir: Path
     msa_dir: Path
     constraints_dir: Optional[Path] = None
+    noesy_dir: Optional[Path] = None
 
 
 @dataclass
@@ -303,6 +304,8 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
     msa_pairing_strategy: str,
     max_msa_seqs: int = 4096,
     use_msa_server: bool = False,
+    no_msa: bool = False,
+    noesy_path: Optional[str] = None,
 ) -> None:
     """Process the input data and output directory.
 
@@ -413,11 +416,11 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
                     chain.msa_id = -1
 
             # Generate MSA
-            if to_generate and not use_msa_server:
+            if to_generate and not use_msa_server and not no_msa:
                 msg = "Missing MSA's in input and --use_msa_server flag not set."
                 raise RuntimeError(msg)
 
-            if to_generate:
+            if to_generate and not no_msa:
                 msg = f"Generating MSA for {path} with {len(to_generate)} protein entities."
                 click.echo(msg)
                 compute_msa(
@@ -430,6 +433,8 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
 
             # Parse MSA data
             msas = sorted({c.msa_id for c in target.record.chains if c.msa_id != -1})
+            if no_msa:
+                msas = []
             msa_id_map = {}
             for msa_idx, msa_id in enumerate(msas):
                 # Check that raw MSA exists
@@ -478,6 +483,16 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
                 print(f"Failed to process {path}. Skipping. Error: {e}.")
             else:
                 raise e
+
+    # Handle NOESY data
+    if noesy_path is not None:
+        noesy_dir = out_dir / "processed" / "noesy"
+        noesy_dir.mkdir(parents=True, exist_ok=True)
+        from shutil import copy
+        for record in records:
+            # Assuming the noesy file is for the first record, and has the same name
+            # This logic can be made more robust
+            copy(noesy_path, noesy_dir / f"{record.id}.npz")
 
     # Dump manifest
     manifest = Manifest(records)
@@ -604,6 +619,17 @@ def cli() -> None:
     is_flag=True,
     help="Whether to not use potentials for steering. Default is False.",
 )
+@click.option(
+    "--no_msa",
+    is_flag=True,
+    help="Whether to not use MSA. Default is False.",
+)
+@click.option(
+    "--noesy",
+    type=click.Path(exists=True),
+    help="The path to the NOESY data file.",
+    default=None,
+)
 def predict(
     data: str,
     out_dir: str,
@@ -625,6 +651,8 @@ def predict(
     msa_server_url: str = "https://api.colabfold.com",
     msa_pairing_strategy: str = "greedy",
     no_potentials: bool = False,
+    no_msa: bool = False,
+    noesy: Optional[str] = None,
 ) -> None:
     """Run predictions with Boltz-1."""
     # If cpu, write a friendly warning
@@ -684,9 +712,11 @@ def predict(
         data=data,
         out_dir=out_dir,
         ccd_path=ccd_path,
-        use_msa_server=use_msa_server,
+        use_msa_server=use_msa_server and not no_msa,
         msa_server_url=msa_server_url,
         msa_pairing_strategy=msa_pairing_strategy,
+        no_msa=no_msa,
+        noesy_path=noesy,
     )
 
     # Load processed data
@@ -698,6 +728,9 @@ def predict(
         constraints_dir=(processed_dir / "constraints")
         if (processed_dir / "constraints").exists()
         else None,
+        noesy_dir=(processed_dir / "noesy")
+        if (processed_dir / "noesy").exists()
+        else None,
     )
 
     # Create data module
@@ -707,6 +740,8 @@ def predict(
         msa_dir=processed.msa_dir,
         num_workers=num_workers,
         constraints_dir=processed.constraints_dir,
+        noesy_dir=processed.noesy_dir,
+        no_msa=no_msa,
     )
 
     # Load model
@@ -742,6 +777,7 @@ def predict(
         pairformer_args=asdict(pairformer_args),
         msa_module_args=asdict(msa_module_args),
         steering_args=asdict(steering_args),
+        no_msa=no_msa,
     )
     model_module.eval()
 
