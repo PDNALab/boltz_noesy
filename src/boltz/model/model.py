@@ -32,6 +32,7 @@ from boltz.model.modules.trunk import (
     InputEmbedder,
     MSAModule,
     PairformerModule,
+    NOESYModule,
 )
 from boltz.model.modules.utils import ExponentialMovingAverage
 from boltz.model.optim.scheduler import AlphaFoldLRScheduler
@@ -70,6 +71,7 @@ class Boltz1(LightningModule):
         nucleotide_rmsd_weight: float = 5.0,
         ligand_rmsd_weight: float = 10.0,
         no_msa: bool = False,
+        noesy_module_args: Optional[dict[str, Any]] = None,
         no_atom_encoder: bool = False,
         ema: bool = False,
         ema_decay: float = 0.999,
@@ -189,6 +191,12 @@ class Boltz1(LightningModule):
                 s_input_dim=s_input_dim,
                 **msa_args,
             )
+
+        if noesy_module_args:
+            self.noesy_module = NOESYModule(token_z=token_z, **noesy_module_args)
+        else:
+            self.noesy_module = None
+
         self.pairformer_module = PairformerModule(token_s, token_z, **pairformer_args)
         if compile_pairformer:
             # Big models hit the default cache limit (8)
@@ -310,6 +318,9 @@ class Boltz1(LightningModule):
                     # Compute pairwise stack
                     if not self.no_msa:
                         z = z + self.msa_module(z, s_inputs, feats)
+
+                    if self.noesy_module:
+                        z = z + self.noesy_module(z, feats["noesy_features"])
 
                     # Revert to uncompiled version for validation
                     if self.is_pairformer_compiled and not self.training:

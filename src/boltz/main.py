@@ -3,6 +3,7 @@ import pickle
 import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
+import numpy as np
 from typing import Literal, Optional
 
 import click
@@ -19,8 +20,24 @@ from boltz.data.parse.a3m import parse_a3m
 from boltz.data.parse.csv import parse_csv
 from boltz.data.parse.fasta import parse_fasta
 from boltz.data.parse.yaml import parse_yaml
-from boltz.data.types import MSA, Manifest, Record
+from boltz.data.types import MSA, Manifest, Record, NOESY, NOESYRestraint
 from boltz.data.write.writer import BoltzWriter
+
+def parse_noesy(path: Path) -> NOESY:
+    """Parse a NOESY file."""
+    restraints = []
+    with open(path, "r") as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) == 5:
+                res_idx_1 = int(parts[0])
+                res_idx_2 = int(parts[1])
+                dist = float(parts[2])
+                # The `is_true` flag is not present in the inference input
+                restraints.append((res_idx_1, res_idx_2, dist, True))
+
+    restraints_array = np.array(restraints, dtype=NOESYRestraint)
+    return NOESY(restraints=restraints_array)
 from boltz.model.model import Boltz1
 
 CCD_URL = "https://huggingface.co/boltz-community/boltz-1/resolve/main/ccd.pkl"
@@ -35,7 +52,8 @@ class BoltzProcessedInput:
 
     manifest: Manifest
     targets_dir: Path
-    msa_dir: Path
+    msa_dir: Optional[Path] = None
+    noesy_dir: Optional[Path] = None
     constraints_dir: Optional[Path] = None
 
 
@@ -303,6 +321,7 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
     msa_pairing_strategy: str,
     max_msa_seqs: int = 4096,
     use_msa_server: bool = False,
+    noesy_file: Optional[str] = None,
 ) -> None:
     """Process the input data and output directory.
 
@@ -358,6 +377,7 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
     msa_dir = out_dir / "msa"
     structure_dir = out_dir / "processed" / "structures"
     processed_msa_dir = out_dir / "processed" / "msa"
+    processed_noesy_dir = out_dir / "processed" / "noesy"
     processed_constraints_dir = out_dir / "processed" / "constraints"
     predictions_dir = out_dir / "predictions"
 
@@ -365,6 +385,7 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
     msa_dir.mkdir(parents=True, exist_ok=True)
     structure_dir.mkdir(parents=True, exist_ok=True)
     processed_msa_dir.mkdir(parents=True, exist_ok=True)
+    processed_noesy_dir.mkdir(parents=True, exist_ok=True)
     processed_constraints_dir.mkdir(parents=True, exist_ok=True)
     predictions_dir.mkdir(parents=True, exist_ok=True)
 
@@ -464,6 +485,21 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
 
             # Keep record
             records.append(target.record)
+
+            # Process NOESY data
+            if noesy_file:
+                noesy_path = Path(noesy_file)
+                if not noesy_path.exists():
+                    msg = f"NOESY file {noesy_path} not found."
+                    raise FileNotFoundError(msg)
+
+                # Parse NOESY file
+                noesy = parse_noesy(noesy_path)
+
+                # Dump processed NOESY
+                processed_noesy_dir = out_dir / "processed" / "noesy"
+                processed = processed_noesy_dir / f"{target.record.id}.npz"
+                noesy.dump(processed)
 
             # Dump structure
             struct_path = structure_dir / f"{target.record.id}.npz"
@@ -588,6 +624,12 @@ def cli() -> None:
     help="Whether to use the MMSeqs2 server for MSA generation. Default is False.",
 )
 @click.option(
+    "--noesy_file",
+    type=click.Path(exists=True),
+    help="Path to a file with NOESY restraints.",
+    default=None,
+)
+@click.option(
     "--msa_server_url",
     type=str,
     help="MSA server url. Used only if --use_msa_server is set. ",
@@ -622,6 +664,7 @@ def predict(
     override: bool = False,
     seed: Optional[int] = None,
     use_msa_server: bool = False,
+    noesy_file: Optional[str] = None,
     msa_server_url: str = "https://api.colabfold.com",
     msa_pairing_strategy: str = "greedy",
     no_potentials: bool = False,
@@ -685,6 +728,7 @@ def predict(
         out_dir=out_dir,
         ccd_path=ccd_path,
         use_msa_server=use_msa_server,
+        noesy_file=noesy_file,
         msa_server_url=msa_server_url,
         msa_pairing_strategy=msa_pairing_strategy,
     )
@@ -694,7 +738,8 @@ def predict(
     processed = BoltzProcessedInput(
         manifest=Manifest.load(processed_dir / "manifest.json"),
         targets_dir=processed_dir / "structures",
-        msa_dir=processed_dir / "msa",
+        msa_dir=processed_dir / "msa" if use_msa_server else None,
+        noesy_dir=processed_dir / "noesy" if noesy_file else None,
         constraints_dir=(processed_dir / "constraints")
         if (processed_dir / "constraints").exists()
         else None,
@@ -705,6 +750,7 @@ def predict(
         manifest=processed.manifest,
         target_dir=processed.targets_dir,
         msa_dir=processed.msa_dir,
+        noesy_dir=processed.noesy_dir,
         num_workers=num_workers,
         constraints_dir=processed.constraints_dir,
     )
@@ -732,6 +778,7 @@ def predict(
         steering_args.fk_steering = False
         steering_args.guidance_update = False
 
+    noesy_module_args = {"num_layers": 2, "kernel_size": 3} if noesy_file else None
     model_module: Boltz1 = Boltz1.load_from_checkpoint(
         checkpoint,
         strict=True,
@@ -740,7 +787,9 @@ def predict(
         diffusion_process_args=asdict(diffusion_params),
         ema=False,
         pairformer_args=asdict(pairformer_args),
-        msa_module_args=asdict(msa_module_args),
+        msa_module_args=asdict(msa_module_args) if not noesy_file else None,
+        no_msa=bool(noesy_file),
+        noesy_module_args=noesy_module_args,
         steering_args=asdict(steering_args),
     )
     model_module.eval()

@@ -15,7 +15,16 @@ from boltz.data.feature.symmetry import get_symmetries
 from boltz.data.filter.dynamic.filter import DynamicFilter
 from boltz.data.sample.sampler import Sample, Sampler
 from boltz.data.tokenize.tokenizer import Tokenizer
-from boltz.data.types import MSA, Connection, Input, Manifest, Record, Structure
+from boltz.data.types import (
+    MSA,
+    Connection,
+    Input,
+    Manifest,
+    Record,
+    Structure,
+    NOESY,
+    NOESYRestraint,
+)
 
 
 @dataclass
@@ -23,7 +32,8 @@ class DatasetConfig:
     """Dataset configuration."""
 
     target_dir: str
-    msa_dir: str
+    msa_dir: Optional[str] = None
+    noesy_dir: Optional[str] = None
     prob: float
     sampler: Sampler
     cropper: Cropper
@@ -42,7 +52,6 @@ class DataConfig:
     tokenizer: Tokenizer
     max_atoms: int
     max_tokens: int
-    max_seqs: int
     samples_per_epoch: int
     batch_size: int
     num_workers: int
@@ -56,7 +65,6 @@ class DataConfig:
     overfit: Optional[int] = None
     pad_to_max_tokens: bool = False
     pad_to_max_atoms: bool = False
-    pad_to_max_seqs: bool = False
     crop_validation: bool = False
     return_train_symmetries: bool = False
     return_val_symmetries: bool = True
@@ -72,7 +80,8 @@ class Dataset:
     """Data holder."""
 
     target_dir: Path
-    msa_dir: Path
+    msa_dir: Optional[Path]
+    noesy_dir: Optional[Path]
     manifest: Manifest
     prob: float
     sampler: Sampler
@@ -81,7 +90,9 @@ class Dataset:
     featurizer: BoltzFeaturizer
 
 
-def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
+def load_input(
+    record: Record, target_dir: Path, msa_dir: Optional[Path], noesy_dir: Optional[Path]
+) -> Input:
     """Load the given input data.
 
     Parameters
@@ -90,8 +101,10 @@ def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
         The record to load.
     target_dir : Path
         The path to the data directory.
-    msa_dir : Path
+    msa_dir : Optional[Path]
         The path to msa directory.
+    noesy_dir : Optional[Path]
+        The path to noesy directory.
 
     Returns
     -------
@@ -130,14 +143,73 @@ def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
     )
 
     msas = {}
-    for chain in record.chains:
-        msa_id = chain.msa_id
-        # Load the MSA for this chain, if any
-        if msa_id != -1 and msa_id != "":
-            msa = np.load(msa_dir / f"{msa_id}.npz")
-            msas[chain.chain_id] = MSA(**msa)
+    if msa_dir:
+        for chain in record.chains:
+            msa_id = chain.msa_id
+            # Load the MSA for this chain, if any
+            if msa_id != -1 and msa_id != "":
+                msa = np.load(msa_dir / f"{msa_id}.npz")
+                msas[chain.chain_id] = MSA(**msa)
 
-    return Input(structure, msas)
+    noesies = {}
+    if noesy_dir:
+        # Load pre-computed NOESY data
+        # This part will be used for inference
+        noesy_path = noesy_dir / f"{record.id}.npz"
+        if noesy_path.exists():
+            noesy_data = np.load(noesy_path)
+            noesies[record.id] = NOESY(**noesy_data)
+    else:
+        # Generate NOESY data on the fly
+        # This part will be used for training
+        noesy_data = generate_noesy_restraints(structure)
+        noesies[record.id] = noesy_data
+
+    return Input(structure, msas, noesies)
+
+
+def generate_noesy_restraints(
+    structure: Structure, noise_level: float = 0.1, false_peak_ratio: float = 0.1
+) -> NOESY:
+    """Generate NOESY restraints on the fly from a structure."""
+    ca_coords = []
+    res_indices = []
+    for i, res in enumerate(structure.residues):
+        if res["is_present"]:
+            # Find the CA atom
+            atom_start = res["atom_idx"]
+            atom_end = res["atom_idx"] + res["atom_num"]
+            atoms = structure.atoms[atom_start:atom_end]
+            ca_atom = atoms[atoms["name"] == b"CA  "]
+            if len(ca_atom) > 0:
+                ca_coords.append(ca_atom[0]["coords"])
+                res_indices.append(i)
+
+    ca_coords = np.array(ca_coords)
+    res_indices = np.array(res_indices)
+    num_residues = len(ca_coords)
+    restraints = []
+
+    if num_residues > 1:
+        dist_matrix = np.linalg.norm(
+            ca_coords[:, np.newaxis, :] - ca_coords[np.newaxis, :, :], axis=-1
+        )
+
+        for i in range(num_residues):
+            for j in range(i + 1, num_residues):
+                dist = dist_matrix[i, j]
+                if 0 < dist <= 8.0:
+                    # Add noise
+                    noisy_dist = dist + np.random.normal(0, noise_level)
+                    is_true = np.random.rand() > false_peak_ratio
+
+                    restraints.append(
+                        (res_indices[i], res_indices[j], noisy_dist, is_true)
+                    )
+
+    restraints_array = np.array(restraints, dtype=NOESYRestraint)
+
+    return NOESY(restraints=restraints_array)
 
 
 def collate(data: list[dict[str, Tensor]]) -> dict[str, Tensor]:
@@ -193,10 +265,8 @@ class TrainingDataset(torch.utils.data.Dataset):
         symmetries: dict,
         max_atoms: int,
         max_tokens: int,
-        max_seqs: int,
         pad_to_max_atoms: bool = False,
         pad_to_max_tokens: bool = False,
-        pad_to_max_seqs: bool = False,
         atoms_per_window_queries: int = 32,
         min_dist: float = 2.0,
         max_dist: float = 22.0,
@@ -215,11 +285,9 @@ class TrainingDataset(torch.utils.data.Dataset):
         self.samples_per_epoch = samples_per_epoch
         self.symmetries = symmetries
         self.max_tokens = max_tokens
-        self.max_seqs = max_seqs
         self.max_atoms = max_atoms
         self.pad_to_max_tokens = pad_to_max_tokens
         self.pad_to_max_atoms = pad_to_max_atoms
-        self.pad_to_max_seqs = pad_to_max_seqs
         self.atoms_per_window_queries = atoms_per_window_queries
         self.min_dist = min_dist
         self.max_dist = max_dist
@@ -263,7 +331,9 @@ class TrainingDataset(torch.utils.data.Dataset):
 
         # Get the structure
         try:
-            input_data = load_input(sample.record, dataset.target_dir, dataset.msa_dir)
+            input_data = load_input(
+                sample.record, dataset.target_dir, dataset.msa_dir, dataset.noesy_dir
+            )
         except Exception as e:
             print(
                 f"Failed to load input for {sample.record.id} with error {e}. Skipping."
@@ -304,8 +374,6 @@ class TrainingDataset(torch.utils.data.Dataset):
                 training=True,
                 max_atoms=self.max_atoms if self.pad_to_max_atoms else None,
                 max_tokens=self.max_tokens if self.pad_to_max_tokens else None,
-                max_seqs=self.max_seqs,
-                pad_to_max_seqs=self.pad_to_max_seqs,
                 symmetries=self.symmetries,
                 atoms_per_window_queries=self.atoms_per_window_queries,
                 min_dist=self.min_dist,
@@ -345,10 +413,8 @@ class ValidationDataset(torch.utils.data.Dataset):
         symmetries: dict,
         max_atoms: Optional[int] = None,
         max_tokens: Optional[int] = None,
-        max_seqs: Optional[int] = None,
         pad_to_max_atoms: bool = False,
         pad_to_max_tokens: bool = False,
-        pad_to_max_seqs: bool = False,
         atoms_per_window_queries: int = 32,
         min_dist: float = 2.0,
         max_dist: float = 22.0,
@@ -365,13 +431,11 @@ class ValidationDataset(torch.utils.data.Dataset):
         self.datasets = datasets
         self.max_atoms = max_atoms
         self.max_tokens = max_tokens
-        self.max_seqs = max_seqs
         self.seed = seed
         self.symmetries = symmetries
         self.random = np.random if overfit else np.random.RandomState(self.seed)
         self.pad_to_max_tokens = pad_to_max_tokens
         self.pad_to_max_atoms = pad_to_max_atoms
-        self.pad_to_max_seqs = pad_to_max_seqs
         self.overfit = overfit
         self.crop_validation = crop_validation
         self.atoms_per_window_queries = atoms_per_window_queries
@@ -411,7 +475,9 @@ class ValidationDataset(torch.utils.data.Dataset):
 
         # Get the structure
         try:
-            input_data = load_input(record, dataset.target_dir, dataset.msa_dir)
+            input_data = load_input(
+                record, dataset.target_dir, dataset.msa_dir, dataset.noesy_dir
+            )
         except Exception as e:
             print(f"Failed to load input for {record.id} with error {e}. Skipping.")
             return self.__getitem__(0)
@@ -451,8 +517,6 @@ class ValidationDataset(torch.utils.data.Dataset):
                 training=False,
                 max_atoms=self.max_atoms if pad_atoms else None,
                 max_tokens=self.max_tokens if pad_tokens else None,
-                max_seqs=self.max_seqs,
-                pad_to_max_seqs=self.pad_to_max_seqs,
                 symmetries=self.symmetries,
                 atoms_per_window_queries=self.atoms_per_window_queries,
                 min_dist=self.min_dist,
@@ -515,7 +579,8 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
         for data_config in cfg.datasets:
             # Set target_dir
             target_dir = Path(data_config.target_dir)
-            msa_dir = Path(data_config.msa_dir)
+            msa_dir = Path(data_config.msa_dir) if data_config.msa_dir else None
+            noesy_dir = Path(data_config.noesy_dir) if data_config.noesy_dir else None
 
             # Load manifest
             if data_config.manifest_path is not None:
@@ -560,6 +625,7 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
                 Dataset(
                     target_dir,
                     msa_dir,
+                    noesy_dir,
                     train_manifest,
                     data_config.prob,
                     data_config.sampler,
@@ -576,6 +642,7 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
                     Dataset(
                         target_dir,
                         msa_dir,
+                        noesy_dir,
                         val_manifest,
                         data_config.prob,
                         data_config.sampler,
@@ -600,10 +667,8 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
             samples_per_epoch=cfg.samples_per_epoch,
             max_atoms=cfg.max_atoms,
             max_tokens=cfg.max_tokens,
-            max_seqs=cfg.max_seqs,
             pad_to_max_atoms=cfg.pad_to_max_atoms,
             pad_to_max_tokens=cfg.pad_to_max_tokens,
-            pad_to_max_seqs=cfg.pad_to_max_seqs,
             symmetries=symmetries,
             atoms_per_window_queries=cfg.atoms_per_window_queries,
             min_dist=cfg.min_dist,
@@ -620,10 +685,8 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
             seed=cfg.random_seed,
             max_atoms=cfg.max_atoms,
             max_tokens=cfg.max_tokens,
-            max_seqs=cfg.max_seqs,
             pad_to_max_atoms=cfg.pad_to_max_atoms,
             pad_to_max_tokens=cfg.pad_to_max_tokens,
-            pad_to_max_seqs=cfg.pad_to_max_seqs,
             symmetries=symmetries,
             atoms_per_window_queries=cfg.atoms_per_window_queries,
             min_dist=cfg.min_dist,

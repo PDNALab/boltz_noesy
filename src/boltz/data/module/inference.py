@@ -19,13 +19,16 @@ from boltz.data.types import (
     Record,
     ResidueConstraints,
     Structure,
+    NOESY,
+    NOESYRestraint,
 )
 
 
 def load_input(
     record: Record,
     target_dir: Path,
-    msa_dir: Path,
+    msa_dir: Optional[Path] = None,
+    noesy_dir: Optional[Path] = None,
     constraints_dir: Optional[Path] = None,
 ) -> Input:
     """Load the given input data.
@@ -36,8 +39,10 @@ def load_input(
         The record to load.
     target_dir : Path
         The path to the data directory.
-    msa_dir : Path
+    msa_dir : Optional[Path]
         The path to msa directory.
+    noesy_dir : Optional[Path]
+        The path to noesy directory.
 
     Returns
     -------
@@ -58,12 +63,20 @@ def load_input(
     )
 
     msas = {}
-    for chain in record.chains:
-        msa_id = chain.msa_id
-        # Load the MSA for this chain, if any
-        if msa_id != -1:
-            msa = np.load(msa_dir / f"{msa_id}.npz")
-            msas[chain.chain_id] = MSA(**msa)
+    if msa_dir:
+        for chain in record.chains:
+            msa_id = chain.msa_id
+            # Load the MSA for this chain, if any
+            if msa_id != -1:
+                msa = np.load(msa_dir / f"{msa_id}.npz")
+                msas[chain.chain_id] = MSA(**msa)
+
+    noesies = {}
+    if noesy_dir:
+        noesy_path = noesy_dir / f"{record.id}.npz"
+        if noesy_path.exists():
+            noesy_data = np.load(noesy_path)
+            noesies[record.id] = NOESY(**noesy_data)
 
     residue_constraints = None
     if constraints_dir is not None:
@@ -71,7 +84,9 @@ def load_input(
             constraints_dir / f"{record.id}.npz"
         )
 
-    return Input(structure, msas, residue_constraints=residue_constraints)
+    return Input(
+        structure, msas, noesy=noesies, residue_constraints=residue_constraints
+    )
 
 
 def collate(data: list[dict[str, Tensor]]) -> dict[str, Tensor]:
@@ -125,7 +140,8 @@ class PredictionDataset(torch.utils.data.Dataset):
         self,
         manifest: Manifest,
         target_dir: Path,
-        msa_dir: Path,
+        msa_dir: Optional[Path] = None,
+        noesy_dir: Optional[Path] = None,
         constraints_dir: Optional[Path] = None,
     ) -> None:
         """Initialize the training dataset.
@@ -136,14 +152,17 @@ class PredictionDataset(torch.utils.data.Dataset):
             The manifest to load data from.
         target_dir : Path
             The path to the target directory.
-        msa_dir : Path
+        msa_dir : Optional[Path]
             The path to the msa directory.
+        noesy_dir : Optional[Path]
+            The path to the noesy directory.
 
         """
         super().__init__()
         self.manifest = manifest
         self.target_dir = target_dir
         self.msa_dir = msa_dir
+        self.noesy_dir = noesy_dir
         self.constraints_dir = constraints_dir
         self.tokenizer = BoltzTokenizer()
         self.featurizer = BoltzFeaturizer()
@@ -166,6 +185,7 @@ class PredictionDataset(torch.utils.data.Dataset):
                 record,
                 self.target_dir,
                 self.msa_dir,
+                self.noesy_dir,
                 self.constraints_dir,
             )
         except Exception as e:  # noqa: BLE001
@@ -193,8 +213,6 @@ class PredictionDataset(torch.utils.data.Dataset):
                 training=False,
                 max_atoms=None,
                 max_tokens=None,
-                max_seqs=const.max_msa_seqs,
-                pad_to_max_seqs=False,
                 symmetries={},
                 compute_symmetries=False,
                 inference_binder=binders,
@@ -227,7 +245,8 @@ class BoltzInferenceDataModule(pl.LightningDataModule):
         self,
         manifest: Manifest,
         target_dir: Path,
-        msa_dir: Path,
+        msa_dir: Optional[Path],
+        noesy_dir: Optional[Path],
         num_workers: int,
         constraints_dir: Optional[Path] = None,
     ) -> None:
@@ -244,6 +263,7 @@ class BoltzInferenceDataModule(pl.LightningDataModule):
         self.manifest = manifest
         self.target_dir = target_dir
         self.msa_dir = msa_dir
+        self.noesy_dir = noesy_dir
         self.constraints_dir = constraints_dir
 
     def predict_dataloader(self) -> DataLoader:
@@ -259,6 +279,7 @@ class BoltzInferenceDataModule(pl.LightningDataModule):
             manifest=self.manifest,
             target_dir=self.target_dir,
             msa_dir=self.msa_dir,
+            noesy_dir=self.noesy_dir,
             constraints_dir=self.constraints_dir,
         )
         return DataLoader(

@@ -676,3 +676,65 @@ class DistogramModule(nn.Module):
         """
         z = z + z.transpose(1, 2)
         return self.distogram(z)
+
+
+class NOESYModule(nn.Module):
+    """NOESY module."""
+
+    def __init__(
+        self,
+        token_z: int,
+        noesy_channels: int = 2,
+        num_layers: int = 2,
+        kernel_size: int = 3,
+    ) -> None:
+        """Initialize the NOESY module.
+        Parameters
+        ----------
+        token_z : int
+            The token pairwise embedding size.
+        noesy_channels : int, optional
+            The number of channels in the NOESY feature map, by default 2
+        num_layers : int, optional
+            The number of convolutional layers, by default 2
+        kernel_size : int, optional
+            The kernel size of the convolutions, by default 3
+        """
+        super().__init__()
+        self.conv_layers = nn.ModuleList()
+        in_channels = token_z + noesy_channels
+        for _ in range(num_layers):
+            self.conv_layers.append(
+                nn.Conv2d(
+                    in_channels=in_channels,
+                    out_channels=token_z,
+                    kernel_size=kernel_size,
+                    padding=kernel_size // 2,
+                )
+            )
+            in_channels = token_z
+
+    def forward(self, z: Tensor, noesy_features: Tensor) -> Tensor:
+        """Perform the forward pass.
+        Parameters
+        ----------
+        z : Tensor
+            The pairwise embeddings
+        noesy_features : Tensor
+            The NOESY features
+        Returns
+        -------
+        Tensor
+            The updated pairwise embeddings.
+        """
+        # B, H, W, C -> B, C, H, W
+        z_permuted = z.permute(0, 3, 1, 2)
+        noesy_features_permuted = noesy_features.permute(0, 3, 1, 2)
+
+        x = torch.cat([z_permuted, noesy_features_permuted], dim=1)
+
+        for layer in self.conv_layers:
+            x = layer(x)
+
+        # B, C, H, W -> B, H, W, C
+        return z + x.permute(0, 2, 3, 1)

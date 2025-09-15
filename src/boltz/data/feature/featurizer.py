@@ -896,6 +896,60 @@ def process_atom_features(
     }
 
 
+def process_noesy_features(
+    data: Tokenized,
+    max_tokens: Optional[int] = None,
+) -> dict[str, Tensor]:
+    """Get the NOESY features.
+
+    Parameters
+    ----------
+    data : Tokenized
+        The tokenized data.
+    max_tokens : int
+        The maximum number of tokens.
+
+    Returns
+    -------
+    dict[str, Tensor]
+        The NOESY features.
+
+    """
+    num_tokens = len(data.tokens)
+    noesy_features = torch.zeros(num_tokens, num_tokens, 2)
+
+    if data.noesy:
+        for noesy in data.noesy.values():
+            for restraint in noesy.restraints:
+                res_idx_1 = restraint["res_idx_1"]
+                res_idx_2 = restraint["res_idx_2"]
+                dist = restraint["dist"]
+                is_true = restraint["is_true"]
+
+                # Find the token indices for the residues
+                token_indices_1 = [
+                    i for i, token in enumerate(data.tokens) if token["res_idx"] == res_idx_1
+                ]
+                token_indices_2 = [
+                    i for i, token in enumerate(data.tokens) if token["res_idx"] == res_idx_2
+                ]
+
+                for t1 in token_indices_1:
+                    for t2 in token_indices_2:
+                        noesy_features[t1, t2, 0] = dist
+                        noesy_features[t1, t2, 1] = float(is_true)
+                        noesy_features[t2, t1, 0] = dist
+                        noesy_features[t2, t1, 1] = float(is_true)
+
+    if max_tokens is not None:
+        pad_len = max_tokens - num_tokens
+        if pad_len > 0:
+            noesy_features = pad_dim(noesy_features, 0, pad_len)
+            noesy_features = pad_dim(noesy_features, 1, pad_len)
+
+    return {"noesy_features": noesy_features}
+
+
 def process_msa_features(
     data: Tokenized,
     max_seqs_batch: int,
@@ -1131,14 +1185,12 @@ class BoltzFeaturizer:
         self,
         data: Tokenized,
         training: bool,
-        max_seqs: int = 4096,
         atoms_per_window_queries: int = 32,
         min_dist: float = 2.0,
         max_dist: float = 22.0,
         num_bins: int = 64,
         max_tokens: Optional[int] = None,
         max_atoms: Optional[int] = None,
-        pad_to_max_seqs: bool = False,
         compute_symmetries: bool = False,
         symmetries: Optional[dict] = None,
         binder_pocket_conditioned_prop: Optional[float] = 0.0,
@@ -1150,7 +1202,6 @@ class BoltzFeaturizer:
         compute_constraint_features: bool = False,
     ) -> dict[str, Tensor]:
         """Compute features.
-
         Parameters
         ----------
         data : Tokenized
@@ -1161,21 +1212,11 @@ class BoltzFeaturizer:
             The maximum number of tokens.
         max_atoms : int, optional
             The maximum number of atoms
-        max_seqs : int, optional
-            The maximum number of sequences.
-
         Returns
         -------
         dict[str, Tensor]
             The features for model training.
-
         """
-        # Compute random number of sequences
-        if training and max_seqs is not None:
-            max_seqs_batch = np.random.randint(1, max_seqs + 1)  # noqa: NPY002
-        else:
-            max_seqs_batch = max_seqs
-
         # Compute token features
         token_features = process_token_features(
             data,
@@ -1187,7 +1228,6 @@ class BoltzFeaturizer:
             inference_binder=inference_binder,
             inference_pocket=inference_pocket,
         )
-
         # Compute atom features
         atom_features = process_atom_features(
             data,
@@ -1198,32 +1238,25 @@ class BoltzFeaturizer:
             max_atoms,
             max_tokens,
         )
-
-        # Compute MSA features
-        msa_features = process_msa_features(
+        # Compute NOESY features
+        noesy_features = process_noesy_features(
             data,
-            max_seqs_batch,
-            max_seqs,
             max_tokens,
-            pad_to_max_seqs,
         )
-
         # Compute symmetry features
         symmetry_features = {}
         if compute_symmetries:
             symmetry_features = process_symmetry_features(data, symmetries)
-
         # Compute residue constraint features
         residue_constraint_features = {}
         chain_constraint_features = {}
         if compute_constraint_features:
             residue_constraint_features = process_residue_constraint_features(data)
             chain_constraint_features = process_chain_feature_constraints(data)
-
         return {
             **token_features,
             **atom_features,
-            **msa_features,
+            **noesy_features,
             **symmetry_features,
             **residue_constraint_features,
             **chain_constraint_features,
