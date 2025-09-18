@@ -209,3 +209,5 @@ For example:
 Here's an example command:
 
 `boltz predict input.fasta --noesy_file restraints.txt`
+
+When using the `--noesy_file` option, all MSA-related flags (e.g., `--use_msa_server`) will be ignored.

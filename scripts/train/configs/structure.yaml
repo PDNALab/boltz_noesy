@@ -23,7 +23,7 @@ data:
   datasets:
     - _target_: boltz.data.module.training.DatasetConfig
       target_dir: PATH_TO_TARGETS_DIR
-      noesy_dir: PATH_TO_NOESY_DIR
+      msa_dir: PATH_TO_MSA_DIR
       prob: 1.0
       sampler:
         _target_: boltz.data.sample.cluster.ClusterSampler
@@ -51,8 +51,10 @@ data:
   symmetries: PATH_TO_SYMMETRY_FILE
   max_tokens: 512
   max_atoms: 4608
+  max_seqs: 2048
   pad_to_max_tokens: true
   pad_to_max_atoms: true
+  pad_to_max_seqs: true
   samples_per_epoch: 100000
   batch_size: 1
   num_workers: 4
@@ -91,10 +93,15 @@ model:
     atom_encoder_depth: 3
     atom_encoder_heads: 4
 
-  no_msa: True
-  noesy_module_args:
-    num_layers: 2
-    kernel_size: 3
+  msa_args:
+    msa_s: 64
+    msa_blocks: 4
+    msa_dropout: 0.15
+    z_dropout: 0.25
+    pairwise_head_width: 32
+    pairwise_num_heads: 4
+    activation_checkpointing: true
+    offload_to_cpu: false
 
   pairformer_args:
     num_blocks: 48

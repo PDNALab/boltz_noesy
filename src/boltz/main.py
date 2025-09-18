@@ -735,10 +735,11 @@ def predict(
 
     # Load processed data
     processed_dir = out_dir / "processed"
+    msa_dir = processed_dir / "msa" if use_msa_server and not noesy_file else None
     processed = BoltzProcessedInput(
         manifest=Manifest.load(processed_dir / "manifest.json"),
         targets_dir=processed_dir / "structures",
-        msa_dir=processed_dir / "msa" if use_msa_server else None,
+        msa_dir=msa_dir,
         noesy_dir=processed_dir / "noesy" if noesy_file else None,
         constraints_dir=(processed_dir / "constraints")
         if (processed_dir / "constraints").exists()
@@ -779,6 +780,7 @@ def predict(
         steering_args.guidance_update = False
 
     noesy_module_args = {"num_layers": 2, "kernel_size": 3} if noesy_file else None
+    msa_module_args = asdict(msa_module_args) if not noesy_file else None
     model_module: Boltz1 = Boltz1.load_from_checkpoint(
         checkpoint,
         strict=True,
@@ -787,7 +789,7 @@ def predict(
         diffusion_process_args=asdict(diffusion_params),
         ema=False,
         pairformer_args=asdict(pairformer_args),
-        msa_module_args=asdict(msa_module_args) if not noesy_file else None,
+        msa_module_args=msa_module_args,
         no_msa=bool(noesy_file),
         noesy_module_args=noesy_module_args,
         steering_args=asdict(steering_args),
