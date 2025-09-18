@@ -51,7 +51,7 @@ class Boltz1(LightningModule):
         training_args: dict[str, Any],
         validation_args: dict[str, Any],
         embedder_args: dict[str, Any],
-        msa_args: dict[str, Any],
+        msa_args: Optional[dict[str, Any]] = None,
         pairformer_args: dict[str, Any],
         score_model_args: dict[str, Any],
         diffusion_process_args: dict[str, Any],
