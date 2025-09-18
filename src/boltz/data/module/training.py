@@ -32,11 +32,11 @@ class DatasetConfig:
     """Dataset configuration."""
 
     target_dir: str
-    msa_dir: Optional[str] = None
-    noesy_dir: Optional[str] = None
     prob: float
     sampler: Sampler
     cropper: Cropper
+    msa_dir: Optional[str] = None
+    noesy_dir: Optional[str] = None
     filters: Optional[list] = None
     split: Optional[str] = None
     manifest_path: Optional[str] = None
