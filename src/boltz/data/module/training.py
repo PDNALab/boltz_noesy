@@ -23,10 +23,11 @@ class DatasetConfig:
     """Dataset configuration."""
 
     target_dir: str
-    msa_dir: str
     prob: float
     sampler: Sampler
     cropper: Cropper
+    msa_dir: Optional[str] = None
+    noesy_dir: Optional[str] = None
     filters: Optional[list] = None
     split: Optional[str] = None
     manifest_path: Optional[str] = None
@@ -42,7 +43,7 @@ class DataConfig:
     tokenizer: Tokenizer
     max_atoms: int
     max_tokens: int
-    max_seqs: int
+    max_seqs: Optional[int] = None
     samples_per_epoch: int
     batch_size: int
     num_workers: int
