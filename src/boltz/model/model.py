@@ -51,13 +51,13 @@ class Boltz1(LightningModule):
         training_args: dict[str, Any],
         validation_args: dict[str, Any],
         embedder_args: dict[str, Any],
-        msa_args: Optional[dict[str, Any]] = None,
         pairformer_args: dict[str, Any],
         score_model_args: dict[str, Any],
         diffusion_process_args: dict[str, Any],
         diffusion_loss_args: dict[str, Any],
         confidence_model_args: dict[str, Any],
         steering_args: dict[str, Any],
+        msa_args: Optional[dict[str, Any]] = None,
         atom_feature_dim: int = 128,
         confidence_prediction: bool = False,
         confidence_imitate_trunk: bool = False,
@@ -246,6 +246,7 @@ class Boltz1(LightningModule):
                     pairformer_args=pairformer_args,
                     full_embedder_args=full_embedder_args,
                     msa_args=msa_args,
+                    no_msa=no_msa, 
                     **confidence_model_args,
                 )
             else:

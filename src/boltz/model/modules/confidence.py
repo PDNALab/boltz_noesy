@@ -36,6 +36,7 @@ class ConfidenceModule(nn.Module):
         imitate_trunk=False,
         full_embedder_args: dict = None,
         msa_args: dict = None,
+        no_msa: bool = False,
         compile_pairformer=False,
     ):
         """Initialize the confidence module.
@@ -128,11 +129,16 @@ class ConfidenceModule(nn.Module):
             init.gating_init_(self.z_recycle.weight)
 
             # Pairwise stack
-            self.msa_module = MSAModule(
-                token_z=token_z,
-                s_input_dim=s_input_dim,
-                **msa_args,
-            )
+            self.no_msa = no_msa
+            if not no_msa:
+                self.msa_module = MSAModule(
+                    token_z=token_z,
+                    s_input_dim=s_input_dim,
+                    **msa_args,
+                )
+            else:
+                self.msa_module = None
+
             self.pairformer_module = PairformerModule(
                 token_s,
                 token_z,
@@ -297,7 +303,8 @@ class ConfidenceModule(nn.Module):
         pair_mask = mask[:, :, None] * mask[:, None, :]
 
         if self.imitate_trunk:
-            z = z + self.msa_module(z, s_inputs, feats)
+            if not self.no_msa:
+                z = z + self.msa_module(z, s_inputs, feats)
 
             s, z = self.pairformer_module(s, z, mask=mask, pair_mask=pair_mask)
 

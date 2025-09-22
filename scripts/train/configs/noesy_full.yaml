@@ -13,7 +13,7 @@ trainer:
 #   entity: boltz
 
 
-output: SET_PATH_HERE
+output: /orange/alberto.perezant/imesh.ranaweera/test_softwares/boltzNOESY/output
 pretrained: PATH_TO_CHECKPOINT_FILE
 resume: null
 disable_checkpoint: false
@@ -23,7 +23,7 @@ save_top_k: -1
 data:
   datasets:
     - _target_: boltz.data.module.training.DatasetConfig
-      target_dir: PATH_TO_TARGETS_DIR
+      target_dir: /orange/alberto.perezant/imesh.ranaweera/AF_data/boltzNOESY/data/rcsb_processed_targets
       noesy_dir: null
       prob: 1.0
       sampler:
@@ -49,7 +49,7 @@ data:
   featurizer:
     _target_: boltz.data.feature.featurizer.BoltzFeaturizer
 
-  symmetries: PATH_TO_SYMMETRY_FILE
+  symmetries: /orange/alberto.perezant/imesh.ranaweera/AF_data/boltzNOESY/data/symmetry.pkl
   max_tokens: 512
   max_atoms: 4608
   pad_to_max_tokens: true

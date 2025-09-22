@@ -9,6 +9,11 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+boltz_env/
+python==3.12/
+train.sh
+train_B.err
+train_B.out
 develop-eggs/
 dist/
 downloads/

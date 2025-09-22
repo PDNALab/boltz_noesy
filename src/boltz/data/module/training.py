@@ -15,7 +15,7 @@ from boltz.data.feature.symmetry import get_symmetries
 from boltz.data.filter.dynamic.filter import DynamicFilter
 from boltz.data.sample.sampler import Sample, Sampler
 from boltz.data.tokenize.tokenizer import Tokenizer
-from boltz.data.types import MSA, Connection, Input, Manifest, Record, Structure
+from boltz.data.types import MSA, NOESY, Connection, Input, Manifest, NOESYRestraint, Record, Structure
 
 
 @dataclass
@@ -43,7 +43,6 @@ class DataConfig:
     tokenizer: Tokenizer
     max_atoms: int
     max_tokens: int
-    max_seqs: Optional[int] = None
     samples_per_epoch: int
     batch_size: int
     num_workers: int
@@ -54,6 +53,7 @@ class DataConfig:
     min_dist: float
     max_dist: float
     num_bins: int
+    max_seqs: Optional[int] = None
     overfit: Optional[int] = None
     pad_to_max_tokens: bool = False
     pad_to_max_atoms: bool = False
@@ -73,16 +73,17 @@ class Dataset:
     """Data holder."""
 
     target_dir: Path
-    msa_dir: Path
     manifest: Manifest
     prob: float
     sampler: Sampler
     cropper: Cropper
     tokenizer: Tokenizer
     featurizer: BoltzFeaturizer
+    msa_dir: Optional[Path] = None
+    noesy_dir: Optional[Path] = None
 
 
-def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
+def load_input(record: Record, target_dir: Path, msa_dir: Optional[Path] = None, noesy_dir: Optional[Path] = None) -> Input:
     """Load the given input data.
 
     Parameters
@@ -91,8 +92,10 @@ def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
         The record to load.
     target_dir : Path
         The path to the data directory.
-    msa_dir : Path
-        The path to msa directory.
+    msa_dir : Optional[Path], optional
+        The path to msa directory, by default None
+    noesy_dir : Optional[Path], optional
+        The path to noesy directory, by default None
 
     Returns
     -------
@@ -101,11 +104,12 @@ def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
 
     """
     # Load the structure
-    structure = np.load(target_dir / "structures" / f"{record.id}.npz")
+    structure_path = target_dir / "structures" / f"{record.id}.npz"
+    structure_data = np.load(strcture_path, allow_pickle=True)
 
     # In order to add cyclic_period to chains if it does not exist
     # Extract the chains array
-    chains = structure["chains"]
+    chains = structure_data["chains"]
     # Check if the field exists
     if "cyclic_period" not in chains.dtype.names:
         # Create a new dtype with the additional field
@@ -121,24 +125,68 @@ def load_input(record: Record, target_dir: Path, msa_dir: Path) -> Input:
         chains = new_chains
 
     structure = Structure(
-        atoms=structure["atoms"],
-        bonds=structure["bonds"],
-        residues=structure["residues"],
+        atoms=structure_data["atoms"],
+        bonds=structure_data["bonds"],
+        residues=structure_data["residues"],
         chains=chains, # chains var accounting for missing cyclic_period
-        connections=structure["connections"].astype(Connection),
-        interfaces=structure["interfaces"],
-        mask=structure["mask"],
+        connections=structure_data["connections"].astype(Connection),
+        interfaces=structure_data["interfaces"],
+        mask=structure_data["mask"],
     )
 
     msas = {}
-    for chain in record.chains:
-        msa_id = chain.msa_id
-        # Load the MSA for this chain, if any
-        if msa_id != -1 and msa_id != "":
-            msa = np.load(msa_dir / f"{msa_id}.npz")
-            msas[chain.chain_id] = MSA(**msa)
+    if msa_dir is not None:
+        for chain in record.chains:
+            msa_id = chain.msa_id
+            # Load the MSA for this chain, if any
+            if msa_id != -1 and msa_id != "":
+                msa_path = msa_dir / f"{msa_id}.npz"
+                if msa_path.exists():
+                    msas[chain.chain_id] = MSA(**msa)
+    
+    # Load or generate NOESY data
+    noesys = {}
+    if noesy_dir is not None:
+        # Load from file - assume one file per record
+        noesy_path = noesy_dir / f"{record.id}.npz"
+        if noesy_path.exists():
+            noesy_data = np.load(noesy_path)
+            # Assuming the file contains a 'restraints' array
+            if 'restraints' in noesy_data:
+                noesys ={"all_chains": NOESY(restraints=noesy_data["restraints"])}
+    
+    # On-the-fly generation for protein chains
+    else:
+        ca_mask = np.core.defchararray.strip(structure.atoms["name"].astype(str)) == "CA"
+        if np.any(ca_mask):
+            ca_coords = structure.atoms[ca_mask]["coords"]
 
-    return Input(structure, msas)
+            if len(ca_coords) > 1:
+                dist_matrix = np.linalg.norm(
+                    ca_coords[:, np.newaxis, :] - ca_coords[np.newaxis, :, :], axis=-1
+                )
+
+                res_idx_1, res_idx_2 = np.where((dist_matrix > 0) & (dist_matrix < 8.0))
+                dists = dist_matrix[res_idx_1, res_idx_2]
+
+                true_restraints = list(zip(res_idx_1, res_idx_2, dists, [True] * len(dists)))
+
+                num_false_peaks = int(0.1 * len(true_restraints))
+                false_restraints = []
+                if len(ca_coords) > 1:
+                    for _ in range(num_false_peaks):
+                        r1, r2 = np.random.choice(len(ca_coords), 2, replace=False)
+                        dist = np.random.uniform(2.0, 20.0)
+                        false_restraints.append((r1, r2, dist, False))
+
+                all_restraints_list = true_restraints + false_restraints
+                if all_restraints_list:
+                    restraints_array = np.array(
+                        all_restraints_list, dtype=NOESYRestraint
+                    )
+                    noesys = {"protein_noesy": NOESY(restraints=restraints_array)}
+
+    return Input(structure = structure, msas=msas, noesys=noesys, record=record)
 
 
 def collate(data: list[dict[str, Tensor]]) -> dict[str, Tensor]:
@@ -194,7 +242,7 @@ class TrainingDataset(torch.utils.data.Dataset):
         symmetries: dict,
         max_atoms: int,
         max_tokens: int,
-        max_seqs: int,
+        max_seqs: Optional[int] = None,
         pad_to_max_atoms: bool = False,
         pad_to_max_tokens: bool = False,
         pad_to_max_seqs: bool = False,
@@ -264,7 +312,7 @@ class TrainingDataset(torch.utils.data.Dataset):
 
         # Get the structure
         try:
-            input_data = load_input(sample.record, dataset.target_dir, dataset.msa_dir)
+            input_data = load_input(sample.record, dataset.target_dir, dataset.msa_dir, dataset.noesy_dir)
         except Exception as e:
             print(
                 f"Failed to load input for {sample.record.id} with error {e}. Skipping."
@@ -412,7 +460,7 @@ class ValidationDataset(torch.utils.data.Dataset):
 
         # Get the structure
         try:
-            input_data = load_input(record, dataset.target_dir, dataset.msa_dir)
+            input_data = load_input(record, dataset.target_dir, dataset.msa_dir, dataset.noesy_dir)
         except Exception as e:
             print(f"Failed to load input for {record.id} with error {e}. Skipping.")
             return self.__getitem__(0)
@@ -516,7 +564,8 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
         for data_config in cfg.datasets:
             # Set target_dir
             target_dir = Path(data_config.target_dir)
-            msa_dir = Path(data_config.msa_dir)
+            msa_dir = Path(data_config.msa_dir) if data_config.msa_dir else None
+            noesy_dir = Path(data_config.noesy_dir) if data_config.noesy_dir else None
 
             # Load manifest
             if data_config.manifest_path is not None:
@@ -559,14 +608,15 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
             train_manifest = Manifest(train_records)
             train.append(
                 Dataset(
-                    target_dir,
-                    msa_dir,
-                    train_manifest,
-                    data_config.prob,
-                    data_config.sampler,
-                    data_config.cropper,
-                    cfg.tokenizer,
-                    cfg.featurizer,
+                    target_dir = target_dir,
+                    manifest = train_manifest,
+                    prob = data_config.prob,
+                    sampler = data_config.sampler,
+                    cropper = data_config.cropper,
+                    tokenizer = cfg.tokenizer,
+                    featurizer = cfg.featurizer,
+                    msa_dir = msa_dir,
+                    noesy_dir = noesy_dir,
                 )
             )
 
@@ -575,14 +625,15 @@ class BoltzTrainingDataModule(pl.LightningDataModule):
                 val_manifest = Manifest(val_records)
                 val.append(
                     Dataset(
-                        target_dir,
-                        msa_dir,
-                        val_manifest,
-                        data_config.prob,
-                        data_config.sampler,
-                        data_config.cropper,
-                        cfg.tokenizer,
-                        cfg.featurizer,
+                        target_dir = target_dir,
+                        manifest = val_manifest,
+                        prob = data_config.prob,
+                        sampler = data_config.sampler,
+                        cropper = data_config.cropper,
+                        tokenizer = cfg.tokenizer,
+                        featurizer = cfg.featurizer,
+                        msa_dir = msa_dir,
+                        noesy_dir = noesy_dir,
                     )
                 )
 
