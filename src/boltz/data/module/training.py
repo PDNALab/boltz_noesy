@@ -105,7 +105,7 @@ def load_input(record: Record, target_dir: Path, msa_dir: Optional[Path] = None,
     """
     # Load the structure
     structure_path = target_dir / "structures" / f"{record.id}.npz"
-    structure_data = np.load(strcture_path, allow_pickle=True)
+    structure_data = np.load(structure_path, allow_pickle=True)
 
     # In order to add cyclic_period to chains if it does not exist
     # Extract the chains array
@@ -186,7 +186,7 @@ def load_input(record: Record, target_dir: Path, msa_dir: Optional[Path] = None,
                     )
                     noesys = {"protein_noesy": NOESY(restraints=restraints_array)}
 
-    return Input(structure = structure, msas=msas, noesys=noesys, record=record)
+    return Input(structure = structure, msa=msas, noesys=noesys, record=record)
 
 
 def collate(data: list[dict[str, Tensor]]) -> dict[str, Tensor]:
