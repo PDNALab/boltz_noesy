@@ -1191,6 +1191,8 @@ class BoltzFeaturizer:
         num_bins: int = 64,
         max_tokens: Optional[int] = None,
         max_atoms: Optional[int] = None,
+        max_seqs: Optional[int] = None,
+        pad_to_max_seqs: bool = False,
         compute_symmetries: bool = False,
         symmetries: Optional[dict] = None,
         binder_pocket_conditioned_prop: Optional[float] = 0.0,
@@ -1243,6 +1245,16 @@ class BoltzFeaturizer:
             data,
             max_tokens,
         )
+        # Compute MSA features
+        msa_features = {}
+        if data.msa:
+            msa_features = process_msa_features(
+                data,
+                max_seq_batch = max_seqs, # Assuming max_seqs is batch max
+                max_seqs = max_seqs,
+                max_tokens = max_tokens,
+                pad_to_max_seqs = pad_to_max_seqs,
+            )
         # Compute symmetry features
         symmetry_features = {}
         if compute_symmetries:
@@ -1257,6 +1269,7 @@ class BoltzFeaturizer:
             **token_features,
             **atom_features,
             **noesy_features,
+            **msa_features,
             **symmetry_features,
             **residue_constraint_features,
             **chain_constraint_features,
