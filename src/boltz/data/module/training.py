@@ -186,7 +186,7 @@ def load_input(record: Record, target_dir: Path, msa_dir: Optional[Path] = None,
                     )
                     noesys = {"protein_noesy": NOESY(restraints=restraints_array)}
 
-    return Input(structure = structure, msa=msas, noesys=noesys, record=record)
+    return Input(structure = structure, msa=msas, noesy=noesys, record=record)
 
 
 def collate(data: list[dict[str, Tensor]]) -> dict[str, Tensor]:
