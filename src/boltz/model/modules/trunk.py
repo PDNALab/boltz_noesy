@@ -97,8 +97,22 @@ class InputEmbedder(nn.Module):
         """
         # Load relevant features
         res_type = feats["res_type"]
-        profile = feats["profile"]
-        deletion_mean = feats["deletion_mean"].unsqueeze(-1)
+        if "profile" in feats:
+            profile = feats["profile"]
+        else:
+            profile = torch.zeros(
+                (*res_type.shape[:-1], const.num_tokens),
+                device = res_type.device,
+                dtype = torch.float32,
+            )
+        if "deletion_mean" in feats:
+            deletion_mean = feats["deletion_mean"].unsqueeze(-1)
+        else:
+            deletion_mean = torch.zeros(
+                (*res_type.shape[:-1], 1),
+                device = res_type.device,
+                dtype = torch.float32,
+            )
         pocket_feature = feats["pocket_feature"]
 
         # Compute input embedding
