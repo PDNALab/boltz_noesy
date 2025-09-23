@@ -19,7 +19,7 @@ from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.utilities import rank_zero_only
 
 from boltz.data.module.training import BoltzTrainingDataModule, DataConfig
-
+torch.set_float32_matmul_precision('high') # or 'medium'
 
 @dataclass
 class TrainConfig:

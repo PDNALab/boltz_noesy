@@ -593,13 +593,13 @@ class Boltz1(LightningModule):
         # Only compute over parameters that are being trained
         parameters = filter(lambda p: p.requires_grad, module.parameters())
         parameters = filter(lambda p: p.grad is not None, parameters)
-        norm = torch.tensor([p.grad.norm(p=2) ** 2 for p in parameters]).sum().sqrt()
+        norm = torch.tensor([p.grad.detach().norm(p=2) ** 2 for p in parameters]).sum().sqrt()
         return norm
 
     def parameter_norm(self, module) -> float:
         # Only compute over parameters that are being trained
         parameters = filter(lambda p: p.requires_grad, module.parameters())
-        norm = torch.tensor([p.norm(p=2) ** 2 for p in parameters]).sum().sqrt()
+        norm = torch.tensor([p.detach().norm(p=2) ** 2 for p in parameters]).sum().sqrt()
         return norm
 
     def validation_step(self, batch: dict[str, Tensor], batch_idx: int):
