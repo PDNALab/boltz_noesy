@@ -531,17 +531,18 @@ class Boltz1(LightningModule):
 
         lr = self.trainer.optimizers[0].param_groups[0]["lr"]
         self.log("lr", lr, prog_bar=False)
-
-        self.log(
-            "train/grad_norm_msa_module",
-            self.gradient_norm(self.msa_module),
-            prog_bar=False,
-        )
-        self.log(
-            "train/param_norm_msa_module",
-            self.parameter_norm(self.msa_module),
-            prog_bar=False,
-        )
+        
+        if hasattr(self, "msa_module"):
+            self.log(
+                "train/grad_norm_msa_module",
+                self.gradient_norm(self.msa_module),
+                prog_bar=False,
+            )
+            self.log(
+                "train/param_norm_msa_module",
+                self.parameter_norm(self.msa_module),
+                prog_bar=False,
+            )
 
         self.log(
             "train/grad_norm_pairformer_module",

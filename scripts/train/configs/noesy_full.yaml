@@ -14,7 +14,7 @@ trainer:
 
 
 output: /orange/alberto.perezant/imesh.ranaweera/test_softwares/boltzNOESY/output
-pretrained: PATH_TO_CHECKPOINT_FILE
+pretrained: null
 resume: null
 disable_checkpoint: false
 matmul_precision: null
