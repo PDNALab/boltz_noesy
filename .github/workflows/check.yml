@@ -30,7 +30,15 @@ jobs:
           pip install --upgrade pip setuptools wheel
           pip install -e ".[test]"
 
-      - name: Run tests
+      - name: Debug repository layout
+        run: |
+          echo "PWD: $(pwd)"
+          ls -la
+          echo "ls at repo root done"
+          if [ -d boltz ]; then echo "Found subdir 'boltz':"; ls -la boltz || true; fi
+
+      - name: Run tests (discovery)
         run: |
           source boltz_env/bin/activate
-          python -m pytest tests/test_utils.py
+          echo "Running pytest discovery..."
+          python -m pytest -q
