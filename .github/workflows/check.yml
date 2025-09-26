@@ -34,8 +34,41 @@ jobs:
         run: |
           echo "PWD: $(pwd)"
           ls -la
-          echo "ls at repo root done"
           if [ -d boltz ]; then echo "Found subdir 'boltz':"; ls -la boltz || true; fi
+
+      - name: Create trifast stub to avoid GPU import error in CI
+        run: |
+          # create minimal trifast package to shadow the GPU package in CI
+          mkdir -p trifast
+          cat > trifast/__init__.py <<'PY'
+# Minimal CI stub for trifast to avoid CUDA probes during import
+from . import torch as torch  # expose submodule
+from .primitives import triangle_attention
+PY
+          cat > trifast/primitives.py <<'PY'
+# simple placeholder for triangle_attention used by tests during collection
+def triangle_attention(*args, **kwargs):
+    return None
+PY
+          cat > trifast/torch.py <<'PY'
+# stub trifast.torch to avoid calling real torch.cuda at import time
+class cuda:
+    @staticmethod
+    def get_device_capability(device=0):
+        return (0, 0)
+    @staticmethod
+    def is_available():
+        return False
+PY
+          cat > trifast/triton.py <<'PY'
+# minimal stub
+PY
+          cat > trifast/autotune.py <<'PY'
+# minimal stub
+def autotune(*args, **kwargs):
+    return None
+PY
+          echo "trifast stub created"
 
       - name: Run tests (discovery)
         run: |
