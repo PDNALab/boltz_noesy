@@ -38,4 +38,4 @@ jobs:
       - name: Run tests
         run: |
           source boltz_env/bin/activate
-          pytest tests/test_basic.py
+          pytest tests/test_utils.py
