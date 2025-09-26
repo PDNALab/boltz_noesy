@@ -40,5 +40,4 @@ jobs:
       - name: Run tests (discovery)
         run: |
           source boltz_env/bin/activate
-          echo "Running pytest discovery..."
-          python -m pytest -q
+          CUDA_VISIBLE_DEVICES="" python -m pytest -q
