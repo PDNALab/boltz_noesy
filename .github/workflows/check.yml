@@ -5,12 +5,11 @@ on:
     branches:
       - main
       - noesy_model2
-  pull_request:
-  workflow_dispatch:
 
 jobs:
   install-and-test:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -23,25 +22,7 @@ jobs:
       - name: Create virtual environment
         run: |
           python -m venv boltz_env
-
-      - name: Create trifast stub to avoid GPU import on CI
-        run: |
-          mkdir -p trifast
-          cat > trifast/__init__.py <<'PY'
-# CI stub for trifast to avoid CUDA probes during import
-from . import torch as torch
-from .primitives import triangle_attention
-PY
-          cat > trifast/primitives.py <<'PY'
-def triangle_attention(*args, **kwargs): return None
-PY
-          cat > trifast/torch.py <<'PY'
-class cuda:
-    @staticmethod
-    def get_device_capability(device=0): return (0,0)
-    @staticmethod
-    def is_available(): return False
-PY
+          echo "Virtual environment created."
 
       - name: Install package and test deps
         run: |
@@ -53,10 +34,11 @@ PY
         run: |
           echo "PWD: $(pwd)"
           ls -la
+          echo "ls at repo root done"
+          if [ -d boltz ]; then echo "Found subdir 'boltz':"; ls -la boltz || true; fi
 
       - name: Run tests (discovery)
-        env:
-          CUDA_VISIBLE_DEVICES: ""
         run: |
           source boltz_env/bin/activate
+          echo "Running pytest discovery..."
           python -m pytest -q
