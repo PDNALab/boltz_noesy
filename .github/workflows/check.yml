@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - noesy_model2
+  workflow_dispatch:
 
 jobs:
   install-and-test:
@@ -34,10 +35,45 @@ jobs:
         run: |
           echo "PWD: $(pwd)"
           ls -la
-          echo "ls at repo root done"
-          if [ -d boltz ]; then echo "Found subdir 'boltz':"; ls -la boltz || true; fi
+
+      - name: Create trifast stub to avoid GPU import on CI
+        run: |
+          # create minimal trifast package in repo root to shadow site-packages
+          mkdir -p trifast
+          cat > trifast/__init__.py <<'PY'
+# CI stub for trifast to avoid GPU probes during import
+from . import torch as torch
+from .primitives import triangle_attention
+PY
+          cat > trifast/primitives.py <<'PY'
+# placeholder triangle_attention used during import/collection
+def triangle_attention(*args, **kwargs):
+    return None
+PY
+          cat > trifast/torch.py <<'PY'
+# minimal stub that avoids accessing real torch.cuda
+class cuda:
+    @staticmethod
+    def get_device_capability(device=0):
+        return (0, 0)
+    @staticmethod
+    def is_available():
+        return False
+PY
+          cat > trifast/triton.py <<'PY'
+# minimal stub for CI
+PY
+          cat > trifast/autotune.py <<'PY'
+# minimal stub for CI autotune
+def autotune(*args, **kwargs):
+    return None
+PY
+          echo "trifast stub created in repo root"
 
       - name: Run tests (discovery)
+        env:
+          # ensure no CUDA devices visible to any libs
+          CUDA_VISIBLE_DEVICES: ""
         run: |
           source boltz_env/bin/activate
-          CUDA_VISIBLE_DEVICES="" python -m pytest -q
+          python -m pytest -q
