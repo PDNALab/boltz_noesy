@@ -23,13 +23,12 @@ jobs:
       - name: Create virtual environment
         run: |
           python -m venv boltz_env
-          echo "Virtual environment created."
 
       - name: Create trifast stub to avoid GPU import on CI
         run: |
           mkdir -p trifast
           cat > trifast/__init__.py <<'PY'
-# CI stub for trifast to avoid GPU probes during import
+# CI stub for trifast to avoid CUDA probes during import
 from . import torch as torch
 from .primitives import triangle_attention
 PY
@@ -43,13 +42,6 @@ class cuda:
     @staticmethod
     def is_available(): return False
 PY
-          cat > trifast/triton.py <<'PY'
-# minimal stub
-PY
-          cat > trifast/autotune.py <<'PY'
-def autotune(*args, **kwargs): return None
-PY
-          echo "trifast stub created in repo root"
 
       - name: Install package and test deps
         run: |
