@@ -37,8 +37,10 @@ jobs:
           echo "ls at repo root done"
           if [ -d boltz ]; then echo "Found subdir 'boltz':"; ls -la boltz || true; fi
 
-      - name: Run tests (discovery, skip GPU tests)
+      - name: Run all tests (GPU tests skipped if no CUDA)
+        env:
+          GITHUB_ACTIONS: true
         run: |
           source boltz_env/bin/activate
-          echo "Running pytest discovery, skipping GPU tests..."
-          python -m pytest -q -m "not gpu"
+          echo "Running pytest (tests requiring CUDA will be skipped in CI)..."
+          python -m pytest -q
