@@ -77,6 +77,14 @@ Our model and code are released under MIT License, and can be freely used for bo
 If you use this code or the models in your research, please cite the following paper:
 
 ```bibtex
+@article{
+}
+```
+
+Everyone who is using BoltzNOESY should site Boltz-1 paper as well:
+
+
+```bibtex
 @article{wohlwend2024boltz1,
   author = {Wohlwend, Jeremy and Corso, Gabriele and Passaro, Saro and Getz, Noah and Reveiz, Mateo and Leidal, Ken and Swiderski, Wojtek and Atkinson, Liam and Portnoi, Tally and Chinn, Itamar and Silterra, Jacob and Jaakkola, Tommi and Barzilay, Regina},
   title = {Boltz-1: Democratizing Biomolecular Interaction Modeling},
